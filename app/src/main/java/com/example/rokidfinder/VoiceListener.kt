@@ -161,10 +161,15 @@ class VoiceListener(private val context: Context) {
         private const val MODEL_ASSET_DIR = "model-en-us"
         private const val MODEL_UNPACK_DIR = "model-en-us"
 
-        // Vosk grammar (JSON array of allowed phrases). Keep "[unk]" so noise
-        // collapses to unknown instead of being force-matched to a real phrase.
-        private const val PHONE_GRAMMAR =
-            """["where is my phone","where's my phone","wheres my phone",""" +
-            """"find my phone","i lost my phone","my phone","phone","[unk]"]"""
+        // Vosk grammar (JSON array of allowed phrases). Constrained to the small
+        // set of tracked items + a few intent prefixes — accuracy is far better
+        // than free-form. "[unk]" so noise collapses to unknown rather than being
+        // force-matched. Update both this list AND [TrackedItems.ALL] when adding.
+        private const val PHONE_GRAMMAR = """[
+"where is my phone","where's my phone","wheres my phone","find my phone","my phone","phone",
+"where is my laptop","where's my laptop","wheres my laptop","find my laptop","my laptop","laptop",
+"where is my cup","where's my cup","wheres my cup","find my cup","my cup","cup",
+"[unk]"
+]"""
     }
 }

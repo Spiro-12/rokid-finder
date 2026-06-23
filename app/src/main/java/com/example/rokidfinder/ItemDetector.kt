@@ -9,38 +9,40 @@ import org.tensorflow.lite.task.vision.detector.Detection
 import org.tensorflow.lite.task.vision.detector.ObjectDetector
 
 /**
- * On-device "cell phone" detector. EfficientDet-Lite0 (int8) ships in assets/
- * and uses COCO labels — we only care about the "cell phone" class.
+ * Multi-item detector. Wraps the same EfficientDet-Lite0 (COCO) we used in PART 1
+ * and reports the max confidence we saw for each [TrackedItems] COCO label this
+ * frame. The visibility flag for an individual item is decided by [FinderService]
+ * using its own per-item threshold so the model itself stays vocabulary-agnostic.
  */
-class PhoneDetector(context: Context) {
+class ItemDetector(context: Context) {
 
     private val detector: ObjectDetector = ObjectDetector.createFromFileAndOptions(
         context,
         MODEL_ASSET,
         ObjectDetector.ObjectDetectorOptions.builder()
             .setBaseOptions(BaseOptions.builder().setNumThreads(2).build())
-            .setMaxResults(10)
+            .setMaxResults(15)
             .setScoreThreshold(SCORE_THRESHOLD)
             .build()
     )
 
-    data class Result(val visible: Boolean, val confidence: Float)
-
-    fun detect(bitmap: Bitmap): Result {
-        // TFLite Task Vision needs ARGB_8888; CameraFrameSource gives us that already.
+    /** Returns [coco-label-lowercase → best confidence this frame]. Missing labels = 0. */
+    fun detect(bitmap: Bitmap): Map<String, Float> {
         val input = if (bitmap.config == Bitmap.Config.ARGB_8888) bitmap
                     else bitmap.copy(Bitmap.Config.ARGB_8888, false)
         val results: List<Detection> = detector.detect(TensorImage.fromBitmap(input))
-        var best = 0f
+        val out = mutableMapOf<String, Float>()
         for (det in results) {
             for (cat in det.categories) {
-                if (cat.label.equals(TARGET_LABEL, ignoreCase = true) && cat.score > best) {
-                    best = cat.score
+                val label = cat.label.lowercase()
+                if (label in TrackedItems.COCO_LABELS) {
+                    val cur = out[label] ?: 0f
+                    if (cat.score > cur) out[label] = cat.score
                 }
             }
         }
         if (input !== bitmap) input.recycle()
-        return Result(visible = best >= SCORE_THRESHOLD, confidence = best)
+        return out
     }
 
     fun close() {
@@ -48,9 +50,8 @@ class PhoneDetector(context: Context) {
     }
 
     companion object {
-        private const val TAG = "PhoneDetector"
+        private const val TAG = "ItemDetector"
         private const val MODEL_ASSET = "efficientdet_lite0.tflite"
-        private const val TARGET_LABEL = "cell phone"
-        private const val SCORE_THRESHOLD = 0.40f
+        const val SCORE_THRESHOLD = 0.40f
     }
 }

@@ -5,7 +5,7 @@
     android:orientation="vertical"
     android:gravity="center"
     android:background="@android:color/black"
-    android:padding="20dp">
+    android:padding="18dp">
 
     <TextView
         android:id="@+id/title"
@@ -13,37 +13,28 @@
         android:layout_height="wrap_content"
         android:text="RokidFinder"
         android:textColor="#00FF66"
-        android:textSize="24sp"
+        android:textSize="22sp"
         android:fontFamily="monospace" />
 
     <TextView
-        android:id="@+id/phoneStatus"
+        android:id="@+id/inView"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="14dp"
         android:gravity="center"
-        android:text="starting…"
+        android:text="in view: starting…"
         android:textColor="#00FF66"
-        android:textSize="22sp"
+        android:textSize="20sp"
         android:textStyle="bold"
-        android:fontFamily="monospace" />
-
-    <TextView
-        android:id="@+id/confidence"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:gravity="center"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp"
         android:fontFamily="monospace" />
 
     <TextView
         android:id="@+id/fps"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
+        android:layout_marginTop="4dp"
         android:gravity="center"
+        android:text=""
         android:textColor="#888888"
         android:textSize="12sp"
         android:fontFamily="monospace" />
@@ -56,34 +47,24 @@
         android:background="#333333" />
 
     <TextView
-        android:id="@+id/lastSeenLabel"
+        android:id="@+id/memoriesLabel"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="last seen:"
+        android:text="memories"
         android:textColor="#888888"
         android:textSize="12sp"
         android:fontFamily="monospace" />
 
     <TextView
-        android:id="@+id/lastSeenWhen"
+        android:id="@+id/memoriesList"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
+        android:layout_marginTop="6dp"
         android:gravity="center"
-        android:text="never"
+        android:text=""
         android:textColor="#FFFFFF"
-        android:textSize="18sp"
-        android:textStyle="bold"
+        android:textSize="16sp"
         android:fontFamily="monospace" />
-
-    <ImageView
-        android:id="@+id/lastSeenThumb"
-        android:layout_width="160dp"
-        android:layout_height="120dp"
-        android:layout_marginTop="10dp"
-        android:background="#111111"
-        android:scaleType="centerCrop"
-        android:contentDescription="last seen photo" />
 
     <TextView
         android:id="@+id/voiceState"
