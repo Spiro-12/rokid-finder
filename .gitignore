@@ -1,0 +1,21 @@
+# Build outputs
+build/
+.gradle/
+.kotlin/
+
+# IDE / OS junk
+.idea/
+*.iml
+.DS_Store
+
+# Machine-specific (your local Android SDK path)
+local.properties
+
+# Python venv from the YOLOv8 export experiment (2.6 GB)
+.yolo-export-venv/
+
+# YOLOv8 export artifacts (reverted; can be re-generated if we ever revisit)
+yolov8n.pt
+yolov8n.onnx
+yolov8n_saved_model/
+calibration_image_sample_data_*.npy
