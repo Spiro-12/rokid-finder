@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.graphics.BitmapFactory
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -14,18 +13,16 @@ import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
 import android.view.WindowManager
-import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
- * Phase-4 HUD. Tap the touchpad → listen for ~3s. If you say "where's my phone"
- * (or anything mentioning "phone" + an intent word), opens the Recall view.
+ * Phase-1 watching HUD: shows live "in view" summary across all tracked items,
+ * fps + voice readiness, and a compact list of the most recent memories.
+ * A touchpad tap opens [RecallActivity]; a voice query for an item opens it
+ * focused on that item.
  *
  * Grant on the glasses (Android 12):
  *   adb shell pm grant com.example.rokidfinder android.permission.CAMERA
@@ -33,22 +30,19 @@ import java.util.Locale
  */
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var phoneStatus: TextView
-    private lateinit var confidence: TextView
+    private lateinit var inView: TextView
     private lateinit var fps: TextView
-    private lateinit var lastSeenWhen: TextView
-    private lateinit var lastSeenThumb: ImageView
+    private lateinit var memoriesList: TextView
     private lateinit var voiceState: TextView
 
-    private lateinit var store: LastSeenStore
-    private val timeFmt = SimpleDateFormat("h:mm a", Locale.US)
+    private lateinit var store: MemoryStore
     private val handler = Handler(Looper.getMainLooper())
     private var voiceReady: Boolean = false
     private var isListening: Boolean = false
 
     private val tick = object : Runnable {
         override fun run() {
-            refreshLastSeen()
+            refreshMemories()
             handler.postDelayed(this, 10_000)
         }
     }
@@ -59,21 +53,19 @@ class MainActivity : AppCompatActivity() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 FinderService.ACTION_RESULT -> {
-                    val visible = intent.getBooleanExtra(FinderService.EXTRA_VISIBLE, false)
-                    val conf = intent.getFloatExtra(FinderService.EXTRA_CONFIDENCE, 0f)
+                    val visible = intent.getStringExtra(FinderService.EXTRA_VISIBLE_SUMMARY) ?: ""
                     val f = intent.getFloatExtra(FinderService.EXTRA_FPS, 0f)
                     voiceReady = intent.getBooleanExtra(FinderService.EXTRA_VOICE_READY, false)
-                    if (visible) {
-                        phoneStatus.text = "phone: VISIBLE"
-                        phoneStatus.setTextColor(0xFF00FF66.toInt())
+                    if (visible.isBlank()) {
+                        inView.text = "in view: nothing"
+                        inView.setTextColor(0xFFFF6633.toInt())
                     } else {
-                        phoneStatus.text = "phone: not in view"
-                        phoneStatus.setTextColor(0xFFFF6633.toInt())
+                        inView.text = "in view: $visible"
+                        inView.setTextColor(0xFF00FF66.toInt())
                     }
-                    confidence.text = "conf: ${"%.2f".format(conf)}"
                     fps.text = "fps: ${"%.1f".format(f)} | voice: ${if (voiceReady) "ready" else "loading"}"
                 }
-                FinderService.ACTION_SAVED -> refreshLastSeen()
+                FinderService.ACTION_SAVED -> refreshMemories()
                 FinderService.ACTION_VOICE -> handleVoice(intent)
             }
         }
@@ -82,6 +74,7 @@ class MainActivity : AppCompatActivity() {
     private fun handleVoice(intent: Intent) {
         val state = intent.getStringExtra(FinderService.EXTRA_VOICE_STATE) ?: return
         val transcript = intent.getStringExtra(FinderService.EXTRA_VOICE_TRANSCRIPT) ?: ""
+        val itemKey = intent.getStringExtra(FinderService.EXTRA_VOICE_ITEM_KEY) ?: ""
         handler.removeCallbacks(clearVoiceMsg)
         when (state) {
             FinderService.STATE_LISTENING -> {
@@ -92,7 +85,7 @@ class MainActivity : AppCompatActivity() {
             FinderService.STATE_MATCHED -> {
                 isListening = false
                 voiceState.text = ""
-                startActivity(Intent(this, RecallActivity::class.java))
+                openRecall(focusItemKey = itemKey.ifBlank { null })
             }
             FinderService.STATE_DONE -> {
                 isListening = false
@@ -116,15 +109,13 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
-        phoneStatus = findViewById(R.id.phoneStatus)
-        confidence = findViewById(R.id.confidence)
+        inView = findViewById(R.id.inView)
         fps = findViewById(R.id.fps)
-        lastSeenWhen = findViewById(R.id.lastSeenWhen)
-        lastSeenThumb = findViewById(R.id.lastSeenThumb)
+        memoriesList = findViewById(R.id.memoriesList)
         voiceState = findViewById(R.id.voiceState)
 
-        store = LastSeenStore(this)
-        refreshLastSeen()
+        store = MemoryStore(this)
+        refreshMemories()
         requestNeededPermissions()
     }
 
@@ -155,7 +146,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (granted(Manifest.permission.CAMERA)) startFinder()
-        refreshLastSeen()
+        refreshMemories()
         inputBlockedUntilMs = System.currentTimeMillis() + INPUT_BLOCK_MS
     }
 
@@ -182,7 +173,7 @@ class MainActivity : AppCompatActivity() {
         if (granted(Manifest.permission.CAMERA)) {
             startFinder()
         } else {
-            phoneStatus.text = "camera denied — grant via adb"
+            inView.text = "camera denied — grant via adb"
         }
     }
 
@@ -190,28 +181,36 @@ class MainActivity : AppCompatActivity() {
         ContextCompat.startForegroundService(this, Intent(this, FinderService::class.java))
     }
 
-    private fun refreshLastSeen() {
-        val ts = store.timestampMs()
-        if (ts == 0L) {
-            lastSeenWhen.text = "never"
-            lastSeenThumb.setImageDrawable(null)
+    /** Compact list of recent memories for the HUD. Empty → "no memories yet". */
+    private fun refreshMemories() {
+        val all = store.all()
+        if (all.isEmpty()) {
+            memoriesList.text = "no memories yet"
+            memoriesList.setTextColor(0xFF888888.toInt())
             return
         }
-        lastSeenWhen.text = "${timeFmt.format(Date(ts))}  (${humanAgo(ts)})"
-        store.photoPath()?.let { path ->
-            val opts = BitmapFactory.Options().apply { inSampleSize = 4 }
-            val bmp = BitmapFactory.decodeFile(path, opts)
-            if (bmp != null) lastSeenThumb.setImageBitmap(bmp)
+        val sb = StringBuilder()
+        for (m in all) {
+            val display = TrackedItems.byKey(m.item)?.display ?: m.item
+            sb.append(display).append("  ").append(humanAgo(m.tsMs)).append('\n')
         }
+        memoriesList.text = sb.toString().trimEnd()
+        memoriesList.setTextColor(0xFFFFFFFF.toInt())
+    }
+
+    private fun openRecall(focusItemKey: String?) {
+        val i = Intent(this, RecallActivity::class.java)
+        if (focusItemKey != null) i.putExtra(RecallActivity.EXTRA_FOCUS_ITEM, focusItemKey)
+        startActivity(i)
     }
 
     private fun humanAgo(tsMs: Long): String {
         val s = (System.currentTimeMillis() - tsMs) / 1000
         return when {
             s < 60 -> "just now"
-            s < 3600 -> "${s / 60} min ago"
-            s < 86_400 -> "${s / 3600} hr ago"
-            else -> "${s / 86_400} d ago"
+            s < 3600 -> "${s / 60}m ago"
+            s < 86_400 -> "${s / 3600}h ago"
+            else -> "${s / 86_400}d ago"
         }
     }
 
@@ -223,11 +222,7 @@ class MainActivity : AppCompatActivity() {
         if (keyCode in IGNORED_KEYS) return super.onKeyDown(keyCode, event)
         if (System.currentTimeMillis() < inputBlockedUntilMs) return true
         if (isListening) return true
-        // Trigger voice query in the FinderService.
-        sendBroadcast(
-            Intent(FinderService.ACTION_REQUEST_LISTEN).setPackage(packageName)
-        )
-        // Block further touchpad events until after the listen window finishes.
+        sendBroadcast(Intent(FinderService.ACTION_REQUEST_LISTEN).setPackage(packageName))
         inputBlockedUntilMs = System.currentTimeMillis() + (FinderService.LISTEN_MS + 500L)
         return true
     }
