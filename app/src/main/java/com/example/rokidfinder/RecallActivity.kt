@@ -11,6 +11,7 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.text.SimpleDateFormat
@@ -24,6 +25,7 @@ import java.util.Locale
  */
 class RecallActivity : AppCompatActivity() {
 
+    private lateinit var scroller: ScrollView
     private lateinit var list: LinearLayout
     private lateinit var empty: TextView
     private lateinit var hint: TextView
@@ -42,9 +44,11 @@ class RecallActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_recall)
+        scroller = findViewById(R.id.scroller)
         list = findViewById(R.id.list)
         empty = findViewById(R.id.empty)
         hint = findViewById(R.id.hint)
+        hint.text = "swipe to scroll · tap to return"
         store = MemoryStore(this)
         refresh()
     }
@@ -65,15 +69,36 @@ class RecallActivity : AppCompatActivity() {
         handler.removeCallbacks(tick)
     }
 
-    /** Any key dismisses. */
+    /**
+     * Touchpad routing:
+     *  - Swipes (DPAD_UP/DOWN/LEFT/RIGHT) scroll the list.
+     *  - Tap (KEYCODE_ENTER / KEYCODE_DPAD_CENTER / BACK) dismisses.
+     *  - Everything else is logged & consumed so unknown keycodes from the
+     *    glasses panel can be discovered and bound in a follow-up.
+     */
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         Log.i(TAG, "recall onKeyDown keycode=$keyCode")
         if (System.currentTimeMillis() < inputBlockedUntilMs) return true
-        if (keyCode == KeyEvent.KEYCODE_BACK || keyCode !in IGNORED_KEYS) {
-            finish()
-            return true
+
+        return when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_LEFT,
+            KeyEvent.KEYCODE_PAGE_UP -> {
+                scroller.smoothScrollBy(0, -SCROLL_STEP_PX)
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT,
+            KeyEvent.KEYCODE_PAGE_DOWN -> {
+                scroller.smoothScrollBy(0, SCROLL_STEP_PX)
+                true
+            }
+            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_BACK -> {
+                finish()
+                true
+            }
+            in IGNORED_KEYS -> super.onKeyDown(keyCode, event)
+            else -> true  // consume but don't dismiss — logged above
         }
-        return super.onKeyDown(keyCode, event)
     }
 
     private fun refresh() {
@@ -127,6 +152,7 @@ class RecallActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "RokidFinder.Recall"
         private const val INPUT_BLOCK_MS = 700L
+        private const val SCROLL_STEP_PX = 240
         const val EXTRA_FOCUS_ITEM = "focusItemKey"
         private val IGNORED_KEYS = setOf(
             KeyEvent.KEYCODE_VOLUME_UP,
