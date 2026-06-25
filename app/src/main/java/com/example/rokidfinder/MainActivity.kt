@@ -185,6 +185,10 @@ class MainActivity : AppCompatActivity() {
         whisper = findViewById(R.id.whisper)
         presenceDot = findViewById(R.id.presenceDot)
 
+        // Warm up the speech engine now so the first answer in RecallActivity
+        // doesn't wait on the TTS engine's async init.
+        Tts.ensureInit(this)
+
         requestNeededPermissions()
     }
 

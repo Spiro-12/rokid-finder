@@ -116,9 +116,20 @@ class RecallActivity : AppCompatActivity() {
             heroMemories = all
             heroIndex = startIdx
             showHeroAt(heroIndex)
+            // Phase 2: speak the answer alongside the photo. Only on the initial
+            // voice-driven entry — manual swipe-through is silent so the user
+            // isn't talked at every time they glance.
+            speakHero(heroMemories[heroIndex])
         } else {
             renderBrowse()
         }
+    }
+
+    /** Compose and speak a one-line answer for [m]. */
+    private fun speakHero(m: MemoryStore.Memory) {
+        val display = TrackedItems.byKey(m.item)?.display ?: m.item
+        val phrase = "Your ${display.lowercase()}, ${humanAgo(m.tsMs).lowercase()}"
+        Tts.speak(phrase)
     }
 
     private fun showHeroAt(index: Int) {

@@ -31,7 +31,16 @@ android {
     }
 
     androidResources {
-        noCompress += listOf("tflite")
+        // Keep these formats uncompressed in the APK so they can be mmap'd at runtime.
+        noCompress += listOf("tflite", "onnx")
+    }
+
+    // Limit native libs to the ABI the glasses use — the sherpa-onnx prebuilt
+    // ships four ABIs (~140 MB total); we only need arm64-v8a.
+    splits {
+        abi {
+            isEnable = false  // we already pruned other ABIs from jniLibs/
+        }
     }
 }
 
