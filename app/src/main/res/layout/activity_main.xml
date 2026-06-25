@@ -1,80 +1,47 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:orientation="vertical"
-    android:gravity="center"
-    android:background="@android:color/black"
-    android:padding="18dp">
+    android:background="@android:color/black">
 
-    <TextView
-        android:id="@+id/title"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="RokidFinder"
-        android:textColor="#00FF66"
-        android:textSize="22sp"
-        android:fontFamily="monospace" />
-
-    <TextView
-        android:id="@+id/inView"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:gravity="center"
-        android:text="in view: starting…"
-        android:textColor="#00FF66"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:fontFamily="monospace" />
-
-    <TextView
-        android:id="@+id/fps"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
-        android:gravity="center"
-        android:text=""
-        android:textColor="#888888"
-        android:textSize="12sp"
-        android:fontFamily="monospace" />
-
-    <View
+    <!--
+      Live camera preview, drawn BEHIND the HUD. Hidden by default so normal
+      wear stays a clean optical see-through. Toggle with volume-up (see
+      MainActivity.onKeyDown) when recording.
+    -->
+    <ImageView
+        android:id="@+id/cameraPreview"
         android:layout_width="match_parent"
-        android:layout_height="1dp"
-        android:layout_marginTop="14dp"
-        android:layout_marginBottom="14dp"
-        android:background="#333333" />
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop"
+        android:alpha="0.5"
+        android:contentDescription="camera preview"
+        android:visibility="gone" />
 
+    <!-- Watching presence: the entire idle UI. -->
+    <View
+        android:id="@+id/presenceDot"
+        android:layout_width="22dp"
+        android:layout_height="22dp"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="72dp"
+        android:background="@drawable/presence_dot" />
+
+    <!-- Reusable whisper line for save / voice / status moments. Hidden by default. -->
     <TextView
-        android:id="@+id/memoriesLabel"
+        android:id="@+id/whisper"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="memories"
-        android:textColor="#888888"
-        android:textSize="12sp"
-        android:fontFamily="monospace" />
-
-    <TextView
-        android:id="@+id/memoriesList"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="6dp"
-        android:gravity="center"
+        android:layout_gravity="bottom|center_horizontal"
+        android:layout_marginBottom="108dp"
+        android:paddingHorizontal="12dp"
+        android:paddingVertical="4dp"
         android:text=""
         android:textColor="#FFFFFF"
-        android:textSize="16sp"
-        android:fontFamily="monospace" />
+        android:textSize="14sp"
+        android:fontFamily="sans-serif"
+        android:alpha="0"
+        android:visibility="invisible" />
 
-    <TextView
-        android:id="@+id/voiceState"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:gravity="center"
-        android:text=""
-        android:textColor="#FFCC33"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:fontFamily="monospace" />
-</LinearLayout>
+
+</FrameLayout>

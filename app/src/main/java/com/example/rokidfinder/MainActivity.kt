@@ -12,17 +12,19 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.KeyEvent
+import android.view.View
 import android.view.WindowManager
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 /**
- * Phase-1 watching HUD: shows live "in view" summary across all tracked items,
- * fps + voice readiness, and a compact list of the most recent memories.
- * A touchpad tap opens [RecallActivity]; a voice query for an item opens it
- * focused on that item.
+ * Watching HUD — designed to disappear until needed. Idle wear shows only a
+ * dim presence dot; saves and voice feedback surface as brief whispers; the
+ * answer (full-bleed photo) lives in [RecallActivity]. A touchpad tap starts a
+ * voice query; a matched item opens recall focused on that item.
  *
  * Grant on the glasses (Android 12):
  *   adb shell pm grant com.example.rokidfinder android.permission.CAMERA
@@ -30,77 +32,147 @@ import androidx.core.content.ContextCompat
  */
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var inView: TextView
-    private lateinit var fps: TextView
-    private lateinit var memoriesList: TextView
-    private lateinit var voiceState: TextView
+    private lateinit var cameraPreview: ImageView
+    private lateinit var whisper: TextView
+    private lateinit var presenceDot: View
 
-    private lateinit var store: MemoryStore
     private val handler = Handler(Looper.getMainLooper())
     private var voiceReady: Boolean = false
     private var isListening: Boolean = false
 
-    private val tick = object : Runnable {
+    private val hideWhisper = Runnable {
+        whisper.animate().cancel()
+        whisper.animate()
+            .alpha(0f)
+            .setDuration(WHISPER_FADE_OUT_MS)
+            .withEndAction { whisper.visibility = View.INVISIBLE }
+            .start()
+    }
+
+    /**
+     * Show a brief, plain-English line low on screen, then fade it away. The
+     * single ambient message slot for save events and voice feedback — Phase 2
+     * replaces the four colored monospace branches of the old voiceState text.
+     */
+    private fun showWhisper(text: String, holdMs: Long = WHISPER_HOLD_DEFAULT_MS) {
+        handler.removeCallbacks(hideWhisper)
+        whisper.animate().cancel()
+        whisper.text = text
+        whisper.visibility = View.VISIBLE
+        whisper.animate()
+            .alpha(1f)
+            .setDuration(WHISPER_FADE_IN_MS)
+            .start()
+        handler.postDelayed(hideWhisper, holdMs)
+    }
+
+    /** Slow alpha pulse on the presence dot — signals "listening". */
+    private fun startDotPulse() {
+        presenceDot.animate().cancel()
+        pulseDown()
+    }
+    private fun pulseDown() {
+        presenceDot.animate()
+            .alpha(0.35f)
+            .setDuration(DOT_PULSE_MS)
+            .withEndAction { if (isListening) pulseUp() }
+            .start()
+    }
+    private fun pulseUp() {
+        presenceDot.animate()
+            .alpha(1f)
+            .setDuration(DOT_PULSE_MS)
+            .withEndAction { if (isListening) pulseDown() }
+            .start()
+    }
+    private fun stopDotPulse() {
+        presenceDot.animate().cancel()
+        presenceDot.alpha = 1f
+    }
+
+    /** Pulls the latest camera frame onto the display while record-mode is on. */
+    private val previewTick = object : Runnable {
         override fun run() {
-            refreshMemories()
-            handler.postDelayed(this, 10_000)
+            FramePreview.take()?.let { cameraPreview.setImageBitmap(it) }
+            if (FramePreview.enabled) handler.postDelayed(this, PREVIEW_FRAME_MS)
         }
     }
 
-    private val clearVoiceMsg = Runnable { voiceState.text = "" }
+    /**
+     * Record mode: mirror what the camera sees onto the monochrome display,
+     * behind the HUD, so a screen recording captures the scene too. Toggled by
+     * the volume-up key on the temple so it's hands-free while filming.
+     */
+    private fun togglePreview() {
+        val on = !FramePreview.enabled
+        Log.i(TAG, "togglePreview -> $on")
+        FramePreview.enabled = on
+        if (on) {
+            cameraPreview.visibility = View.VISIBLE
+            handler.removeCallbacks(previewTick)
+            handler.post(previewTick)
+        } else {
+            handler.removeCallbacks(previewTick)
+            cameraPreview.setImageBitmap(null)
+            cameraPreview.visibility = View.GONE
+            FramePreview.clear()
+        }
+    }
 
     private val receiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             when (intent.action) {
                 FinderService.ACTION_RESULT -> {
-                    val visible = intent.getStringExtra(FinderService.EXTRA_VISIBLE_SUMMARY) ?: ""
-                    val f = intent.getFloatExtra(FinderService.EXTRA_FPS, 0f)
+                    // Phase 1: the idle HUD is just the presence dot. We still
+                    // track voiceReady internally so voice flows can short-circuit.
                     voiceReady = intent.getBooleanExtra(FinderService.EXTRA_VOICE_READY, false)
-                    if (visible.isBlank()) {
-                        inView.text = "in view: nothing"
-                        inView.setTextColor(0xFFFF6633.toInt())
-                    } else {
-                        inView.text = "in view: $visible"
-                        inView.setTextColor(0xFF00FF66.toInt())
-                    }
-                    fps.text = "fps: ${"%.1f".format(f)} | voice: ${if (voiceReady) "ready" else "loading"}"
                 }
-                FinderService.ACTION_SAVED -> refreshMemories()
+                FinderService.ACTION_SAVED -> {
+                    val key = intent.getStringExtra(FinderService.EXTRA_SAVED_ITEM_KEY) ?: ""
+                    val display = TrackedItems.byKey(key)?.display ?: key
+                    if (display.isNotBlank()) {
+                        showWhisper("${display.replaceFirstChar { it.titlecase() }} remembered")
+                    }
+                }
                 FinderService.ACTION_VOICE -> handleVoice(intent)
             }
         }
     }
 
+    /**
+     * Dev/recording trigger for record mode, so it can also be toggled from a
+     * tethered laptop while filming:
+     *   adb shell am broadcast -a com.example.rokidfinder.TOGGLE_PREVIEW
+     * Exported on purpose so the adb shell uid can reach it; debug-only convenience.
+     */
+    private val toggleReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            if (intent.action == ACTION_TOGGLE_PREVIEW) togglePreview()
+        }
+    }
+
     private fun handleVoice(intent: Intent) {
         val state = intent.getStringExtra(FinderService.EXTRA_VOICE_STATE) ?: return
-        val transcript = intent.getStringExtra(FinderService.EXTRA_VOICE_TRANSCRIPT) ?: ""
         val itemKey = intent.getStringExtra(FinderService.EXTRA_VOICE_ITEM_KEY) ?: ""
-        handler.removeCallbacks(clearVoiceMsg)
         when (state) {
             FinderService.STATE_LISTENING -> {
                 isListening = true
-                voiceState.text = "● listening…"
-                voiceState.setTextColor(0xFFFFCC33.toInt())
+                startDotPulse()
             }
             FinderService.STATE_MATCHED -> {
                 isListening = false
-                voiceState.text = ""
+                stopDotPulse()
                 openRecall(focusItemKey = itemKey.ifBlank { null })
             }
             FinderService.STATE_DONE -> {
                 isListening = false
-                voiceState.text = if (transcript.isBlank())
-                    "didn't catch that"
-                else
-                    "heard: \"$transcript\""
-                voiceState.setTextColor(0xFFFFFFFF.toInt())
-                handler.postDelayed(clearVoiceMsg, 2500)
+                stopDotPulse()
+                showWhisper("Didn't catch that")
             }
             FinderService.STATE_NOT_READY -> {
                 isListening = false
-                voiceState.text = "voice model still loading…"
-                voiceState.setTextColor(0xFF888888.toInt())
-                handler.postDelayed(clearVoiceMsg, 2500)
+                stopDotPulse()
+                showWhisper("One moment…")
             }
         }
     }
@@ -109,13 +181,10 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_main)
-        inView = findViewById(R.id.inView)
-        fps = findViewById(R.id.fps)
-        memoriesList = findViewById(R.id.memoriesList)
-        voiceState = findViewById(R.id.voiceState)
+        cameraPreview = findViewById(R.id.cameraPreview)
+        whisper = findViewById(R.id.whisper)
+        presenceDot = findViewById(R.id.presenceDot)
 
-        store = MemoryStore(this)
-        refreshMemories()
         requestNeededPermissions()
     }
 
@@ -132,13 +201,23 @@ class MainActivity : AppCompatActivity() {
             @Suppress("UnspecifiedRegisterReceiverFlag")
             registerReceiver(receiver, filter)
         }
-        handler.post(tick)
+        // Exported on purpose so an `adb shell am broadcast` from a tethered
+        // laptop can flip record mode. ContextCompat applies the right export
+        // flag across API levels (targetSdk 34 defaults to not-exported otherwise).
+        ContextCompat.registerReceiver(
+            this, toggleReceiver, IntentFilter(ACTION_TOGGLE_PREVIEW),
+            ContextCompat.RECEIVER_EXPORTED
+        )
     }
 
     override fun onStop() {
         super.onStop()
         runCatching { unregisterReceiver(receiver) }
-        handler.removeCallbacks(tick)
+        runCatching { unregisterReceiver(toggleReceiver) }
+        handler.removeCallbacks(previewTick)
+        handler.removeCallbacks(hideWhisper)
+        isListening = false
+        stopDotPulse()
     }
 
     private var inputBlockedUntilMs: Long = 0L
@@ -146,7 +225,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         if (granted(Manifest.permission.CAMERA)) startFinder()
-        refreshMemories()
+        if (FramePreview.enabled) {
+            cameraPreview.visibility = View.VISIBLE
+            handler.removeCallbacks(previewTick)
+            handler.post(previewTick)
+        }
         inputBlockedUntilMs = System.currentTimeMillis() + INPUT_BLOCK_MS
     }
 
@@ -173,29 +256,12 @@ class MainActivity : AppCompatActivity() {
         if (granted(Manifest.permission.CAMERA)) {
             startFinder()
         } else {
-            inView.text = "camera denied — grant via adb"
+            showWhisper("Camera denied", holdMs = 3000L)
         }
     }
 
     private fun startFinder() {
         ContextCompat.startForegroundService(this, Intent(this, FinderService::class.java))
-    }
-
-    /** Compact list of recent memories for the HUD. Empty → "no memories yet". */
-    private fun refreshMemories() {
-        val all = store.all()
-        if (all.isEmpty()) {
-            memoriesList.text = "no memories yet"
-            memoriesList.setTextColor(0xFF888888.toInt())
-            return
-        }
-        val sb = StringBuilder()
-        for (m in all) {
-            val display = TrackedItems.byKey(m.item)?.display ?: m.item
-            sb.append(display).append("  ").append(humanAgo(m.tsMs)).append('\n')
-        }
-        memoriesList.text = sb.toString().trimEnd()
-        memoriesList.setTextColor(0xFFFFFFFF.toInt())
     }
 
     private fun openRecall(focusItemKey: String?) {
@@ -204,21 +270,17 @@ class MainActivity : AppCompatActivity() {
         startActivity(i)
     }
 
-    private fun humanAgo(tsMs: Long): String {
-        val s = (System.currentTimeMillis() - tsMs) / 1000
-        return when {
-            s < 60 -> "just now"
-            s < 3600 -> "${s / 60}m ago"
-            s < 86_400 -> "${s / 3600}h ago"
-            else -> "${s / 86_400}d ago"
-        }
-    }
-
     private fun granted(p: String) =
         ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         Log.i(TAG, "main onKeyDown keycode=$keyCode")
+        // Volume-up toggles record mode (camera preview on the display). Hands-free
+        // while filming; volume-down still does normal system volume.
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP) {
+            togglePreview()
+            return true
+        }
         if (keyCode in IGNORED_KEYS) return super.onKeyDown(keyCode, event)
         if (System.currentTimeMillis() < inputBlockedUntilMs) return true
         if (isListening) return true
@@ -231,6 +293,13 @@ class MainActivity : AppCompatActivity() {
         private const val TAG = "RokidFinder.Main"
         private const val REQ = 100
         private const val INPUT_BLOCK_MS = 700L
+        /** Display preview refresh interval (~30fps) while record mode is on. */
+        private const val PREVIEW_FRAME_MS = 33L
+        private const val WHISPER_FADE_IN_MS = 220L
+        private const val WHISPER_FADE_OUT_MS = 400L
+        private const val WHISPER_HOLD_DEFAULT_MS = 1800L
+        private const val DOT_PULSE_MS = 700L
+        const val ACTION_TOGGLE_PREVIEW = "com.example.rokidfinder.TOGGLE_PREVIEW"
         private val IGNORED_KEYS = setOf(
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN,

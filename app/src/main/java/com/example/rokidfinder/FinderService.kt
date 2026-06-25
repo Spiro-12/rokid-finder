@@ -65,6 +65,18 @@ class FinderService : LifecycleService() {
 
         val cam = CameraFrameSource(this) { bitmap ->
             val now = System.currentTimeMillis()
+
+            // Mirror the frame to the display for screen recording (off by
+            // default). Done before the detection throttle so the preview is
+            // smooth at the camera's native rate, independent of inference fps.
+            if (FramePreview.enabled) {
+                val w = PREVIEW_WIDTH
+                val h = (bitmap.height.toLong() * w / bitmap.width).toInt().coerceAtLeast(1)
+                runCatching {
+                    FramePreview.publish(Bitmap.createScaledBitmap(bitmap, w, h, true))
+                }
+            }
+
             if (now - lastInferMs < (1000 / TARGET_FPS)) {
                 bitmap.recycle()
                 return@CameraFrameSource
@@ -246,6 +258,8 @@ class FinderService : LifecycleService() {
 
     companion object {
         const val TARGET_FPS = 3
+        /** Downscaled width of the record-mode display preview (height keeps aspect). */
+        const val PREVIEW_WIDTH = 480
         const val BUFFER_SIZE = 3
         const val ABSENT_THRESHOLD_MS = 2000L
         const val SAVE_COOLDOWN_MS = 15_000L
