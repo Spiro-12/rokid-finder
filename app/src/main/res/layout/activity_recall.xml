@@ -22,20 +22,16 @@
             android:scaleType="centerCrop"
             android:contentDescription="last seen photo" />
 
-        <!-- Scrim behind the caption so text stays legible against bright frames. -->
-        <View
-            android:id="@+id/heroScrim"
-            android:layout_width="match_parent"
-            android:layout_height="120dp"
-            android:layout_gravity="bottom"
-            android:background="#A6000000" />
-
+        <!-- The scrim is the caption block's own background so it always covers
+             the text exactly, even when the context clause wraps to several lines. -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="bottom"
             android:orientation="vertical"
+            android:background="#A6000000"
             android:paddingHorizontal="24dp"
+            android:paddingTop="16dp"
             android:paddingBottom="20dp">
 
             <TextView

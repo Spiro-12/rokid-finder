@@ -127,9 +127,7 @@ class RecallActivity : AppCompatActivity() {
 
     /** Compose and speak a one-line answer for [m]. */
     private fun speakHero(m: MemoryStore.Memory) {
-        val display = TrackedItems.byKey(m.item)?.display ?: m.item
-        val phrase = "Your ${display.lowercase()}, ${humanAgo(m.tsMs).lowercase()}"
-        Tts.speak(phrase)
+        Tts.speak(MemoryPhrases.spoken(m))
     }
 
     private fun showHeroAt(index: Int) {
@@ -138,7 +136,7 @@ class RecallActivity : AppCompatActivity() {
         scroller.visibility = View.GONE
         val display = TrackedItems.byKey(m.item)?.display ?: m.item
         heroName.text = display.replaceFirstChar { it.titlecase() }
-        heroWhen.text = humanAgo(m.tsMs)
+        heroWhen.text = MemoryPhrases.caption(m)
         val path = m.snapshotPath
         heroPhoto.setImageDrawable(null)
         if (path != null) {
@@ -178,7 +176,7 @@ class RecallActivity : AppCompatActivity() {
             val display = TrackedItems.byKey(m.item)?.display ?: m.item
             row.findViewById<TextView>(R.id.itemName).text =
                 display.replaceFirstChar { it.titlecase() }
-            row.findViewById<TextView>(R.id.whenLine).text = humanAgo(m.tsMs)
+            row.findViewById<TextView>(R.id.whenLine).text = MemoryPhrases.caption(m)
             val photo = row.findViewById<ImageView>(R.id.photo)
             val path = m.snapshotPath
             if (path != null) {
@@ -189,19 +187,6 @@ class RecallActivity : AppCompatActivity() {
                 photo.setImageDrawable(null)
             }
             list.addView(row)
-        }
-    }
-
-    private fun humanAgo(tsMs: Long): String {
-        val s = (System.currentTimeMillis() - tsMs) / 1000
-        return when {
-            s < 60 -> "Just now"
-            s < 120 -> "1 minute ago"
-            s < 3600 -> "${s / 60} minutes ago"
-            s < 7200 -> "1 hour ago"
-            s < 86_400 -> "${s / 3600} hours ago"
-            s < 172_800 -> "Yesterday"
-            else -> "${s / 86_400} days ago"
         }
     }
 
