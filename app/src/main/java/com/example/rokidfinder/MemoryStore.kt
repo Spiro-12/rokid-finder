@@ -6,6 +6,7 @@ import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 import android.graphics.Bitmap
 import android.util.Log
+import org.json.JSONArray
 import java.io.File
 import java.io.FileOutputStream
 
@@ -13,10 +14,12 @@ import java.io.FileOutputStream
  * SQLite-backed memory store. One row per tracked item; each new placement
  * overwrites the previous row for that item.
  *
- * Schema mirrors the second-brain plan: a single record per item that already
- * has the [gist] column we'll populate in Phase 3 (place classifier) and the
- * nullable [snapshot] path that will be cleared for everyday items at that
- * stage. For Phase 1 we always write a snapshot.
+ * v2 adds the structured context columns the spoken answer is composed from:
+ * [place] (Phase B place classifier — null until then), [surface] (the COCO
+ * surface the item sat on, e.g. "dining table"), and [near] (JSON array of
+ * nearby object labels). Prose is always composed at read time by
+ * [MemoryPhrases] — nothing derived is persisted, so wording can never go
+ * stale against the structured fields.
  */
 class MemoryStore(private val context: Context) {
 
@@ -27,7 +30,9 @@ class MemoryStore(private val context: Context) {
                 CREATE TABLE $TABLE(
                   item       TEXT PRIMARY KEY,
                   kind       TEXT NOT NULL,
-                  gist       TEXT,
+                  place      TEXT,
+                  surface    TEXT,
+                  near       TEXT,
                   snapshot   TEXT,
                   ts         INTEGER NOT NULL,
                   confidence REAL NOT NULL
@@ -36,6 +41,7 @@ class MemoryStore(private val context: Context) {
             )
         }
         override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+            // Memories are ephemeral by design (latest sighting only) — recreate.
             db.execSQL("DROP TABLE IF EXISTS $TABLE")
             onCreate(db)
         }
@@ -44,7 +50,9 @@ class MemoryStore(private val context: Context) {
     data class Memory(
         val item: String,
         val kind: String,
-        val gist: String?,
+        val place: String?,
+        val surface: String?,
+        val near: List<String>,
         val snapshotPath: String?,
         val tsMs: Long,
         val confidence: Float,
@@ -54,7 +62,14 @@ class MemoryStore(private val context: Context) {
      * Persist a memory. The snapshot is written as `<item>.jpg` in app filesDir
      * (overwriting any prior). Returns the resulting [Memory] or null on failure.
      */
-    fun save(itemKey: String, snapshot: Bitmap?, confidence: Float, gist: String? = null): Memory? {
+    fun save(
+        itemKey: String,
+        snapshot: Bitmap?,
+        confidence: Float,
+        place: String? = null,
+        surface: String? = null,
+        near: List<String> = emptyList(),
+    ): Memory? {
         val spec = TrackedItems.byKey(itemKey) ?: return null
         val now = System.currentTimeMillis()
         val snapPath: String? = snapshot?.let {
@@ -72,7 +87,9 @@ class MemoryStore(private val context: Context) {
         val cv = ContentValues().apply {
             put("item", itemKey)
             put("kind", spec.kind)
-            put("gist", gist)
+            put("place", place)
+            put("surface", surface)
+            put("near", if (near.isEmpty()) null else JSONArray(near).toString())
             put("snapshot", snapPath)
             put("ts", now)
             put("confidence", confidence)
@@ -81,7 +98,7 @@ class MemoryStore(private val context: Context) {
             helper.writableDatabase.insertWithOnConflict(
                 TABLE, null, cv, SQLiteDatabase.CONFLICT_REPLACE
             )
-            Memory(itemKey, spec.kind, gist, snapPath, now, confidence)
+            Memory(itemKey, spec.kind, place, surface, near, snapPath, now, confidence)
         } catch (t: Throwable) {
             Log.e(TAG, "save row for $itemKey failed", t)
             null
@@ -90,7 +107,7 @@ class MemoryStore(private val context: Context) {
 
     fun get(itemKey: String): Memory? {
         helper.readableDatabase.rawQuery(
-            "SELECT item,kind,gist,snapshot,ts,confidence FROM $TABLE WHERE item = ?",
+            "SELECT $COLS FROM $TABLE WHERE item = ?",
             arrayOf(itemKey)
         ).use { c ->
             return if (c.moveToFirst()) c.toMemory() else null
@@ -101,7 +118,7 @@ class MemoryStore(private val context: Context) {
     fun all(): List<Memory> {
         val out = mutableListOf<Memory>()
         helper.readableDatabase.rawQuery(
-            "SELECT item,kind,gist,snapshot,ts,confidence FROM $TABLE ORDER BY ts DESC",
+            "SELECT $COLS FROM $TABLE ORDER BY ts DESC",
             null
         ).use { c ->
             while (c.moveToNext()) out += c.toMemory()
@@ -112,11 +129,20 @@ class MemoryStore(private val context: Context) {
     private fun android.database.Cursor.toMemory() = Memory(
         item = getString(0),
         kind = getString(1),
-        gist = if (isNull(2)) null else getString(2),
-        snapshotPath = if (isNull(3)) null else getString(3),
-        tsMs = getLong(4),
-        confidence = getFloat(5),
+        place = if (isNull(2)) null else getString(2),
+        surface = if (isNull(3)) null else getString(3),
+        near = if (isNull(4)) emptyList() else parseNear(getString(4)),
+        snapshotPath = if (isNull(5)) null else getString(5),
+        tsMs = getLong(6),
+        confidence = getFloat(7),
     )
+
+    private fun parseNear(json: String): List<String> = try {
+        val arr = JSONArray(json)
+        List(arr.length()) { arr.getString(it) }
+    } catch (t: Throwable) {
+        emptyList()
+    }
 
     fun delete(itemKey: String): Boolean {
         // Also remove the JPEG so a forgotten memory is gone end-to-end.
@@ -132,7 +158,8 @@ class MemoryStore(private val context: Context) {
     companion object {
         private const val TAG = "MemoryStore"
         private const val DB_NAME = "rokidfinder.db"
-        private const val DB_VERSION = 1
+        private const val DB_VERSION = 2
         private const val TABLE = "memories"
+        private const val COLS = "item,kind,place,surface,near,snapshot,ts,confidence"
     }
 }

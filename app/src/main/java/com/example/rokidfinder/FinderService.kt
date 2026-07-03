@@ -30,13 +30,16 @@ class FinderService : LifecycleService() {
     private lateinit var store: MemoryStore
     private val voiceExecutor = Executors.newSingleThreadExecutor()
 
+    /** One buffered good look: the frame plus everything detected in it. */
+    private class Sighting(val frame: Bitmap, val dets: List<ItemDetector.Det>)
+
     /** Per-item state. Mutable; only touched from the camera analyzer thread. */
     private class ItemState(val key: String) {
         var lastSeenAtMs: Long = 0L
         var lastSaveAtMs: Long = 0L
         var pendingAbsence: Boolean = false
         var lastSeenConf: Float = 0f
-        val goodFrames: ArrayDeque<Bitmap> = ArrayDeque()
+        val goodFrames: ArrayDeque<Sighting> = ArrayDeque()
     }
     private val states: Map<String, ItemState> =
         TrackedItems.ALL.associate { it.key to ItemState(it.key) }
@@ -83,18 +86,19 @@ class FinderService : LifecycleService() {
             }
             lastInferMs = now
 
-            val confs: Map<String, Float> = try {
+            val dets: List<ItemDetector.Det> = try {
                 det.detect(bitmap)
             } catch (t: Throwable) {
-                emptyMap()
+                emptyList()
             }
+            val confs = ItemDetector.bestByTrackedLabel(dets)
 
             val visibleNow = mutableListOf<String>()
             for (spec in TrackedItems.ALL) {
                 val conf = confs[spec.coco.lowercase()] ?: 0f
                 val state = states[spec.key] ?: continue
                 if (conf >= VISIBLE_THRESHOLD) {
-                    onVisible(state, bitmap, now, conf)
+                    onVisible(state, bitmap, dets, now, conf)
                     visibleNow += spec.display
                 } else {
                     onAbsent(state, now)
@@ -125,15 +129,22 @@ class FinderService : LifecycleService() {
     }
 
     @Synchronized
-    private fun onVisible(state: ItemState, src: Bitmap, nowMs: Long, conf: Float) {
+    private fun onVisible(
+        state: ItemState,
+        src: Bitmap,
+        dets: List<ItemDetector.Det>,
+        nowMs: Long,
+        conf: Float,
+    ) {
         state.lastSeenAtMs = nowMs
         state.lastSeenConf = conf
         state.pendingAbsence = true
         // Own copy: the analyzer recycles the source after the loop, and other items
-        // in the same frame may also want to keep it.
-        state.goodFrames.addLast(src.copy(Bitmap.Config.ARGB_8888, false))
+        // in the same frame may also want to keep it. The frame's detections ride
+        // along so save-time context comes from the exact frame we snapshot.
+        state.goodFrames.addLast(Sighting(src.copy(Bitmap.Config.ARGB_8888, false), dets))
         while (state.goodFrames.size > BUFFER_SIZE) {
-            state.goodFrames.removeFirst().recycle()
+            state.goodFrames.removeFirst().frame.recycle()
         }
     }
 
@@ -147,7 +158,12 @@ class FinderService : LifecycleService() {
             clearBuffer(state); state.pendingAbsence = false; return
         }
         val best = state.goodFrames.last()
-        val saved = store.save(state.key, best, state.lastSeenConf)
+        val context = SceneContext.derive(state.key, best.dets)
+        val saved = store.save(
+            state.key, best.frame, state.lastSeenConf,
+            surface = context.surface,
+            near = context.near,
+        )
         if (saved != null) {
             state.lastSaveAtMs = nowMs
             broadcastSaved(state.key, nowMs)
@@ -157,7 +173,7 @@ class FinderService : LifecycleService() {
     }
 
     private fun clearBuffer(state: ItemState) {
-        while (state.goodFrames.isNotEmpty()) state.goodFrames.removeFirst().recycle()
+        while (state.goodFrames.isNotEmpty()) state.goodFrames.removeFirst().frame.recycle()
     }
 
     private fun clearAllBuffers() {
