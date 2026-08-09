@@ -169,6 +169,8 @@ class VoiceListener(private val context: Context) {
 "where is my phone","where's my phone","wheres my phone","find my phone","my phone","phone",
 "where is my laptop","where's my laptop","wheres my laptop","find my laptop","my laptop","laptop",
 "where is my cup","where's my cup","wheres my cup","find my cup","my cup","cup",
+"where is my keys","where's my keys","wheres my keys","find my keys","my keys","keys",
+"where is my wallet","where's my wallet","wheres my wallet","find my wallet","my wallet","wallet",
 "[unk]"
 ]"""
     }

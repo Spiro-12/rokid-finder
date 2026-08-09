@@ -205,6 +205,15 @@ class MainActivity : AppCompatActivity() {
                 stopDotPulse()
                 showWhisper("Didn't catch that")
             }
+            FinderService.STATE_NEEDS_BRAIN -> {
+                // Heard fine, can't answer offline. Spoken as well as shown: the
+                // wearer is probably looking around for the thing, not at the display.
+                isListening = false
+                stopDotPulse()
+                val line = "I can only find that when your Mac is nearby."
+                showWhisper(line, holdMs = 3000L)
+                Tts.speak(line)
+            }
             FinderService.STATE_NOT_READY -> {
                 isListening = false
                 stopDotPulse()

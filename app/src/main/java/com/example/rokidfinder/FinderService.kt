@@ -274,11 +274,12 @@ class FinderService : LifecycleService() {
             broadcastVoice(state = STATE_LISTENING, transcript = null, itemKey = null)
             val text = v.listen(windowMs = LISTEN_MS)
             val itemKey = if (text != null) matchItem(text) else null
-            broadcastVoice(
-                state = if (itemKey != null) STATE_MATCHED else STATE_DONE,
-                transcript = text,
-                itemKey = itemKey,
-            )
+            val state = when {
+                itemKey != null -> STATE_MATCHED
+                text != null && needsBrain(text) -> STATE_NEEDS_BRAIN
+                else -> STATE_DONE
+            }
+            broadcastVoice(state = state, transcript = text, itemKey = itemKey)
         }
     }
 
@@ -520,6 +521,8 @@ class FinderService : LifecycleService() {
         const val STATE_MATCHED = "matched"
         const val STATE_DONE = "done"
         const val STATE_NOT_READY = "not_ready"
+        /** Heard, understood, and answerable only with the Mac connected. */
+        const val STATE_NEEDS_BRAIN = "needs_brain"
         /** The Mac's transcript of what it heard — HUD only, never spoken. */
         const val STATE_HEARD = "heard"
         /** A full answer from the Mac: speech is already under way. */
@@ -544,6 +547,28 @@ class FinderService : LifecycleService() {
                 if (spec.display.lowercase() in t) return spec.key
             }
             return null
+        }
+
+        /**
+         * Items the wearer actually carries that this device cannot see on its own.
+         *
+         * The on-device detector is EfficientDet, which only knows COCO classes, and
+         * neither keys nor a wallet is a COCO class — that is precisely why the Mac
+         * runs an open-vocabulary detector. The consequence went unnoticed until a
+         * real offline test: asked for keys with the brain unreachable, the glasses
+         * answered "Didn't catch that", which is not what happened. They heard
+         * perfectly well; they simply cannot track the thing.
+         *
+         * Saying so is the difference between "I misheard you" and "I can't help with
+         * that right now", and for someone leaning on this to find their keys, that
+         * distinction is the whole product.
+         */
+        val NEEDS_BRAIN: Set<String> = setOf("keys", "key", "wallet")
+
+        /** True when the words were understood but only the Mac could answer them. */
+        fun needsBrain(text: String): Boolean {
+            val words = text.lowercase().split(Regex("[^a-z]+"))
+            return words.any { it in NEEDS_BRAIN }
         }
     }
 }
