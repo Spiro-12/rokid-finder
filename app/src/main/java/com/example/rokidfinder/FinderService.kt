@@ -21,12 +21,19 @@ import java.util.concurrent.Executors
  * visible→absent state machine per tracked item, persists a memory via
  * [MemoryStore] when an item disappears for [ABSENT_THRESHOLD_MS], and handles
  * voice queries dispatched from the UI via [ACTION_REQUEST_LISTEN].
+ *
+ * Also owns the optional link to the Mac "brain" ([LinkClient] + [FrameUplink]).
+ * The link is additive: when it is down, everything above still works, which is the
+ * whole point of keeping the on-device pipeline.
  */
 class FinderService : LifecycleService() {
 
     private var source: CameraFrameSource? = null
     private var detector: ItemDetector? = null
     private var voice: VoiceListener? = null
+    private var link: LinkClient? = null
+    private var uplink: FrameUplink? = null
+    private var speakQueue: SpeakQueue? = null
     private lateinit var store: MemoryStore
     private val voiceExecutor = Executors.newSingleThreadExecutor()
 
@@ -66,6 +73,16 @@ class FinderService : LifecycleService() {
         val v = VoiceListener(this).also { it.preload() }
         voice = v
 
+        // The brain speaks through the same Piper engine the local pipeline uses,
+        // so it must be warm even if MainActivity never ran.
+        Tts.ensureInit(this)
+        val queue = SpeakQueue()
+        speakQueue = queue
+        val client = LinkClient(this, queue) { state -> broadcastLink(state) }
+        link = client
+        uplink = FrameUplink(client)
+        client.start()
+
         val cam = CameraFrameSource(this) { bitmap ->
             val now = System.currentTimeMillis()
 
@@ -79,6 +96,11 @@ class FinderService : LifecycleService() {
                     FramePreview.publish(Bitmap.createScaledBitmap(bitmap, w, h, true))
                 }
             }
+
+            // Uplink before the inference throttle: the Mac dictates its own frame
+            // rate via `config`, and it must not be coupled to local inference fps.
+            // Non-blocking — drops the frame if the socket is busy.
+            uplink?.offer(bitmap)
 
             if (now - lastInferMs < (1000 / TARGET_FPS)) {
                 bitmap.recycle()
@@ -209,10 +231,15 @@ class FinderService : LifecycleService() {
         source?.stop()
         detector?.close()
         voice?.close()
+        link?.stop()
+        speakQueue?.shutdown()
         clearAllBuffers()
         source = null
         detector = null
         voice = null
+        uplink = null
+        link = null
+        speakQueue = null
         super.onDestroy()
     }
 
@@ -232,6 +259,15 @@ class FinderService : LifecycleService() {
                 .setPackage(packageName)
                 .putExtra(EXTRA_SAVED_ITEM_KEY, itemKey)
                 .putExtra(EXTRA_LAST_SAVED_TS, tsMs)
+        )
+    }
+
+    /** Called from the link thread; sendBroadcast is safe off the main thread. */
+    private fun broadcastLink(state: LinkClient.State) {
+        sendBroadcast(
+            Intent(ACTION_LINK)
+                .setPackage(packageName)
+                .putExtra(EXTRA_LINK_STATE, state.name)
         )
     }
 
@@ -286,6 +322,7 @@ class FinderService : LifecycleService() {
         const val ACTION_SAVED = "com.example.rokidfinder.SAVED"
         const val ACTION_VOICE = "com.example.rokidfinder.VOICE"
         const val ACTION_REQUEST_LISTEN = "com.example.rokidfinder.REQUEST_LISTEN"
+        const val ACTION_LINK = "com.example.rokidfinder.LINK"
 
         const val EXTRA_VISIBLE_SUMMARY = "visibleSummary"
         const val EXTRA_FPS = "fps"
@@ -295,6 +332,8 @@ class FinderService : LifecycleService() {
         const val EXTRA_VOICE_STATE = "voiceState"
         const val EXTRA_VOICE_TRANSCRIPT = "voiceTranscript"
         const val EXTRA_VOICE_ITEM_KEY = "voiceItemKey"
+        /** One of [LinkClient.State] names. */
+        const val EXTRA_LINK_STATE = "linkState"
 
         const val STATE_LISTENING = "listening"
         const val STATE_MATCHED = "matched"

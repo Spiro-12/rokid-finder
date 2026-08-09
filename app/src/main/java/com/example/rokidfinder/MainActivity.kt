@@ -39,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var voiceReady: Boolean = false
     private var isListening: Boolean = false
+    private var lastLinkState: String? = null
 
     private val hideWhisper = Runnable {
         whisper.animate().cancel()
@@ -135,6 +136,7 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
                 FinderService.ACTION_VOICE -> handleVoice(intent)
+                FinderService.ACTION_LINK -> handleLink(intent)
             }
         }
     }
@@ -148,6 +150,24 @@ class MainActivity : AppCompatActivity() {
     private val toggleReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             if (intent.action == ACTION_TOGGLE_PREVIEW) togglePreview()
+        }
+    }
+
+    /**
+     * The link gets a whisper on the way in and on the way out, nothing more — no
+     * persistent status line. The wearer only needs to know when the answers stop
+     * coming from the Mac; the rest of the time the HUD should be empty.
+     */
+    private fun handleLink(intent: Intent) {
+        val state = intent.getStringExtra(FinderService.EXTRA_LINK_STATE) ?: return
+        if (state == lastLinkState) return
+        val previous = lastLinkState
+        lastLinkState = state
+        when (state) {
+            LINK_CONNECTED -> showWhisper("Connected to your brain")
+            // Only announce a loss we can contrast with a connection. Starting up
+            // offline is the normal on-device case and needs no comment.
+            LINK_OFFLINE -> if (previous == LINK_CONNECTED) showWhisper("Brain offline")
         }
     }
 
@@ -198,6 +218,7 @@ class MainActivity : AppCompatActivity() {
             addAction(FinderService.ACTION_RESULT)
             addAction(FinderService.ACTION_SAVED)
             addAction(FinderService.ACTION_VOICE)
+            addAction(FinderService.ACTION_LINK)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(receiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -304,6 +325,8 @@ class MainActivity : AppCompatActivity() {
         private const val WHISPER_HOLD_DEFAULT_MS = 1800L
         private const val DOT_PULSE_MS = 700L
         const val ACTION_TOGGLE_PREVIEW = "com.example.rokidfinder.TOGGLE_PREVIEW"
+        private val LINK_CONNECTED = LinkClient.State.CONNECTED.name
+        private val LINK_OFFLINE = LinkClient.State.OFFLINE.name
         private val IGNORED_KEYS = setOf(
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN,

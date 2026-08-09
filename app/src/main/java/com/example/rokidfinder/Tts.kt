@@ -33,14 +33,25 @@ object Tts {
     private const val SPEED = 1.0f
 
     @Volatile private var engine: OfflineTts? = null
+    /** Set once the load is scheduled — see [ensureInit] for why this exists. */
+    @Volatile private var initStarted: Boolean = false
     @Volatile private var track: AudioTrack? = null
     @Volatile private var stopRequested: Boolean = false
     private val executor = Executors.newSingleThreadExecutor()
 
-    /** Kick off heavy init on a background thread. Idempotent. */
+    /**
+     * Kick off heavy init on a background thread. Idempotent.
+     *
+     * The guard is [initStarted], not `engine != null`: the load is asynchronous,
+     * so `engine` stays null for seconds after the first call. Two callers racing
+     * that window (MainActivity and FinderService both warm the engine) would each
+     * load a full Piper model and AudioTrack, doubling ~36 MB of model plus native
+     * memory on a device with none to spare, and leaking the first track.
+     */
     @Synchronized
     fun ensureInit(context: Context) {
-        if (engine != null) return
+        if (initStarted) return
+        initStarted = true
         val app = context.applicationContext
         executor.execute {
             try {
@@ -66,6 +77,8 @@ object Tts {
                 engine = tts
                 Log.i(TAG, "Sherpa-onnx Piper ready (sampleRate=${tts.sampleRate()})")
             } catch (t: Throwable) {
+                // Allow a later retry rather than leaving the glasses mute forever.
+                initStarted = false
                 Log.e(TAG, "TTS init failed", t)
             }
         }
@@ -173,6 +186,7 @@ object Tts {
 
     fun shutdown() {
         stopRequested = true
+        initStarted = false
         track?.stop()
         track?.release()
         track = null

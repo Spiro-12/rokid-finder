@@ -59,6 +59,9 @@ dependencies {
     // On-device object detection (EfficientDet-Lite0 via the TFLite Task Vision lib).
     implementation("org.tensorflow:tensorflow-lite-task-vision:0.4.4")
 
+    // WebSocket link to the Mac "brain" (Phase 1: The Link)
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // On-device offline speech recognition (Phase 4)
     implementation("net.java.dev.jna:jna:5.13.0@aar")
     implementation("com.alphacephei:vosk-android:0.3.47@aar")
