@@ -49,7 +49,35 @@ class LinkClient(
         val frameFps: Double = 2.5,
         val frameMaxWidth: Int = 640,
         val jpegQuality: Int = 80,
+        val audioEnabled: Boolean = true,
+        val silenceEndpointMs: Long = 1_200L,
+        val maxUtteranceMs: Long = 15_000L,
     )
+
+    /** A voice-query response (protocol §3.2). `speak` is authoritative; the rest is glanceable. */
+    data class Answer(
+        val speak: String,
+        val hudTitle: String,
+        val hudText: String,
+        val imageId: String?,
+    )
+
+    /**
+     * Voice-loop callbacks, delivered on the OkHttp reader thread.
+     *
+     * Kept as a settable property rather than a constructor argument because
+     * [FinderService] needs the link to exist before it can build the pieces
+     * (audio streamer, image fetch) that consume these.
+     */
+    interface Inbound {
+        /** What the Mac heard. HUD only — never spoken, per protocol §3.2. */
+        fun onTranscript(text: String, final: Boolean)
+        fun onAnswer(answer: Answer)
+        /** A non-fatal `error`; the query is over. `speak` has already been queued. */
+        fun onQueryError(code: String)
+    }
+
+    @Volatile var inbound: Inbound? = null
 
     private val appContext = context.applicationContext
 
@@ -63,6 +91,10 @@ class LinkClient(
     @Volatile private var generation: Int = 0
     @Volatile private var stopped: Boolean = false
     @Volatile private var networkCallback: ConnectivityManager.NetworkCallback? = null
+
+    /** The endpoint we are currently talking to, kept for the §5 image fetch. */
+    @Volatile private var host: String? = null
+    @Volatile private var port: Int = 0
 
     private var attempt: Int = 0
     private var heartbeat: ScheduledFuture<*>? = null
@@ -86,6 +118,20 @@ class LinkClient(
      * Frames must never precede `welcome`.
      */
     fun readySocket(): WebSocket? = if (handshakeDone) socket else null
+
+    /**
+     * Whether the brain can answer *right now*. Callers must ask at the moment of the
+     * tap, never cache the result: the whole degraded-mode contract turns on the
+     * decision being live.
+     */
+    fun isConnected(): Boolean = handshakeDone && socket != null
+
+    /** Where to `GET` an answer's photo (protocol §5), or null if the link is down. */
+    fun imageUrl(imageId: String): String? {
+        val h = host ?: return null
+        if (!handshakeDone) return null
+        return "http://$h:$port/img/$imageId"
+    }
 
     /** Post to the link thread, tolerating a shutdown race from an OkHttp callback. */
     private fun submit(block: () -> Unit) {
@@ -168,6 +214,8 @@ class LinkClient(
         }
 
         val gen = ++generation
+        host = endpoint.host
+        port = endpoint.port
         val url = "ws://${endpoint.host}:${endpoint.port}$PATH"
         Log.i(TAG, "connecting to $url")
         socket = http.newWebSocket(
@@ -235,7 +283,7 @@ class LinkClient(
             .put("protocol_version", PROTOCOL_VERSION)
             .put("device", "rokid-glasses")
             .put("app_version", appVersion())
-            .put("capabilities", org.json.JSONArray(listOf("frames", "tts", "hud")))
+            .put("capabilities", org.json.JSONArray(listOf("frames", "audio", "tts", "hud")))
         batteryPct()?.let { hello.put("battery_pct", it) }
         ws.send(hello.toString())
     }
@@ -248,10 +296,11 @@ class LinkClient(
             "pong" -> lastPongMs = System.currentTimeMillis()
             "config" -> applyConfig(msg)
             "speak" -> speakQueue.offer(msg.optString("text"), msg.optString("priority"))
-            // `speak` is the authoritative channel for all three; HUD text is Phase 2.
-            "answer", "reminder" -> speakQueue.offer(msg.optString("speak"), "normal")
+            "answer" -> onAnswer(msg)
+            // `speak` is the authoritative channel; reminder/alert HUD is a later phase.
+            "reminder" -> speakQueue.offer(msg.optString("speak"), "normal")
             "alert" -> speakQueue.offer(msg.optString("speak"), "urgent")
-            "transcript" -> Log.i(TAG, "transcript: ${msg.optString("text")}")
+            "transcript" -> onTranscript(msg)
             "error" -> onError(gen, msg)
             // Forward compatibility: either side may add types. Never fatal.
             else -> Log.i(TAG, "ignoring unknown message type '$type'")
@@ -275,11 +324,35 @@ class LinkClient(
         }
     }
 
+    private fun onTranscript(msg: JSONObject) {
+        val text = msg.optString("text")
+        Log.i(TAG, "transcript: $text")
+        // Never spoken. Echoing it back at the wearer would be talking over them.
+        inbound?.onTranscript(text, msg.optBoolean("final", true))
+    }
+
+    /**
+     * Speech first, always. The handler queues the utterance before it goes near the
+     * optional photo, so a slow or missing image can never delay the answer (§5).
+     */
+    private fun onAnswer(msg: JSONObject) {
+        val answer = Answer(
+            speak = msg.optString("speak"),
+            hudTitle = msg.optString("hud_title"),
+            hudText = msg.optString("hud_text"),
+            imageId = msg.optString("image").takeIf { it.isNotBlank() },
+        )
+        val handler = inbound
+        if (handler != null) handler.onAnswer(answer) else speakQueue.offer(answer.speak, "normal")
+    }
+
     private fun onError(gen: Int, msg: JSONObject) {
         val code = msg.optString("code")
         Log.w(TAG, "brain error: $code ${msg.optString("message")}")
         msg.optString("speak").takeIf { it.isNotBlank() }?.let { speakQueue.offer(it, "normal") }
-        if (msg.optBoolean("fatal", false)) submit { fail(gen, "fatal error $code") }
+        val fatal = msg.optBoolean("fatal", false)
+        if (!fatal) inbound?.onQueryError(code)
+        if (fatal) submit { fail(gen, "fatal error $code") }
     }
 
     private fun applyConfig(msg: JSONObject) {
@@ -290,8 +363,36 @@ class LinkClient(
             frameMaxWidth = msg.optInt("frame_max_width", current.frameMaxWidth)
                 .coerceIn(64, 1920),
             jpegQuality = msg.optInt("jpeg_quality", current.jpegQuality).coerceIn(1, 100),
+            audioEnabled = msg.optBoolean("audio_enabled", current.audioEnabled),
+            // Clamped, not trusted: a zero endpoint would cut every utterance dead,
+            // and an unbounded max would hold the mic open indefinitely.
+            silenceEndpointMs = msg.optLong("silence_endpoint_ms", current.silenceEndpointMs)
+                .coerceIn(300L, 5_000L),
+            maxUtteranceMs = msg.optLong("max_utterance_ms", current.maxUtteranceMs)
+                .coerceIn(1_000L, 60_000L),
         )
         Log.i(TAG, "config: $config")
+    }
+
+    /**
+     * Fetch an answer's photo over plain HTTP (protocol §5). Blocking — call from a
+     * background thread, and treat null as "no photo": the answer is still spoken and
+     * still shown as text.
+     *
+     * A short read timeout is layered onto the shared client here on purpose. The
+     * WebSocket has no read timeout because idleness is legitimate; a stalled image
+     * fetch is not, and must not outlive the answer it belongs to.
+     */
+    fun fetchImage(imageId: String): ByteArray? {
+        val url = imageUrl(imageId) ?: return null
+        return runCatching {
+            val client = http.newBuilder()
+                .readTimeout(IMAGE_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+                .build()
+            client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                if (!resp.isSuccessful) null else resp.body?.bytes()
+            }
+        }.onFailure { Log.w(TAG, "image fetch failed for $imageId", it) }.getOrNull()
     }
 
     // --- helpers -------------------------------------------------------------
@@ -346,6 +447,7 @@ class LinkClient(
         const val CONNECT_TIMEOUT_MS = 5_000L
         const val PING_INTERVAL_MS = 10_000L
         const val PONG_TIMEOUT_MS = 25_000L
+        const val IMAGE_TIMEOUT_MS = 3_000L
         /** 1, 2, 4, 8, 15 s, then every 30 s — jitter applied at use. */
         val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000, 8_000, 15_000, 30_000)
     }

@@ -109,6 +109,7 @@ class RecallActivity : AppCompatActivity() {
     }
 
     private fun render() {
+        if (renderBrainAnswer()) return
         val focusKey = intent.getStringExtra(EXTRA_FOCUS_ITEM)
         val all = store.all().sortedByDescending { it.tsMs }
         val startIdx = focusKey?.let { key -> all.indexOfFirst { it.item == key } } ?: -1
@@ -123,6 +124,37 @@ class RecallActivity : AppCompatActivity() {
         } else {
             renderBrowse()
         }
+    }
+
+    /**
+     * Third hero source: an answer composed by the Mac, which has no local memory row
+     * behind it. Same presentation as the on-device hero on purpose — the wearer should
+     * never be able to tell which brain answered, only that they got an answer.
+     *
+     * Nothing is spoken here: [FinderService] already queued the speech the moment the
+     * answer arrived, so the voice is never waiting on this activity to start.
+     */
+    private fun renderBrainAnswer(): Boolean {
+        val title = intent.getStringExtra(EXTRA_ANSWER_TITLE).orEmpty()
+        val text = intent.getStringExtra(EXTRA_ANSWER_TEXT).orEmpty()
+        if (title.isBlank() && text.isBlank()) return false
+
+        hero.visibility = View.VISIBLE
+        scroller.visibility = View.GONE
+        heroName.text = title.ifBlank { text }
+        heroWhen.text = if (title.isBlank()) "" else text
+
+        heroPhoto.setImageDrawable(null)
+        val path = intent.getStringExtra(EXTRA_ANSWER_PHOTO)
+        if (!path.isNullOrBlank()) {
+            val opts = BitmapFactory.Options().apply { inSampleSize = 2 }
+            BitmapFactory.decodeFile(path, opts)?.let { heroPhoto.setImageBitmap(it) }
+        }
+
+        // heroMemories stays empty, so swiping is a no-op: there is nothing to step to.
+        handler.removeCallbacks(autoDismiss)
+        handler.postDelayed(autoDismiss, HERO_AUTODISMISS_MS)
+        return true
     }
 
     /** Compose and speak a one-line answer for [m]. */
@@ -196,6 +228,10 @@ class RecallActivity : AppCompatActivity() {
         private const val SCROLL_STEP_PX = 240
         private const val HERO_AUTODISMISS_MS = 8000L
         const val EXTRA_FOCUS_ITEM = "focusItemKey"
+        /** Set together when the hero content comes from the Mac rather than local memory. */
+        const val EXTRA_ANSWER_TITLE = "answerTitle"
+        const val EXTRA_ANSWER_TEXT = "answerText"
+        const val EXTRA_ANSWER_PHOTO = "answerPhoto"
         private val IGNORED_KEYS = setOf(
             KeyEvent.KEYCODE_VOLUME_UP,
             KeyEvent.KEYCODE_VOLUME_DOWN,

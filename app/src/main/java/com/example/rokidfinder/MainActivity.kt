@@ -179,6 +179,22 @@ class MainActivity : AppCompatActivity() {
                 isListening = true
                 startDotPulse()
             }
+            // Heard, but not answered yet. The pulse stops because the mic has closed;
+            // taps stay blocked because the query is still in flight.
+            FinderService.STATE_HEARD -> {
+                stopDotPulse()
+                val heard = intent.getStringExtra(FinderService.EXTRA_VOICE_TRANSCRIPT) ?: ""
+                if (heard.isNotBlank()) showWhisper(heard)
+            }
+            FinderService.STATE_ANSWER -> {
+                isListening = false
+                stopDotPulse()
+                openAnswer(
+                    title = intent.getStringExtra(FinderService.EXTRA_ANSWER_TITLE) ?: "",
+                    text = intent.getStringExtra(FinderService.EXTRA_ANSWER_TEXT) ?: "",
+                    photoPath = intent.getStringExtra(FinderService.EXTRA_ANSWER_PHOTO) ?: "",
+                )
+            }
             FinderService.STATE_MATCHED -> {
                 isListening = false
                 stopDotPulse()
@@ -293,6 +309,17 @@ class MainActivity : AppCompatActivity() {
         val i = Intent(this, RecallActivity::class.java)
         if (focusItemKey != null) i.putExtra(RecallActivity.EXTRA_FOCUS_ITEM, focusItemKey)
         startActivity(i)
+    }
+
+    /** Same hero screen as a local recall; the content just came from the Mac. */
+    private fun openAnswer(title: String, text: String, photoPath: String) {
+        if (title.isBlank() && text.isBlank()) return
+        startActivity(
+            Intent(this, RecallActivity::class.java)
+                .putExtra(RecallActivity.EXTRA_ANSWER_TITLE, title)
+                .putExtra(RecallActivity.EXTRA_ANSWER_TEXT, text)
+                .putExtra(RecallActivity.EXTRA_ANSWER_PHOTO, photoPath)
+        )
     }
 
     private fun granted(p: String) =

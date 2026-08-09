@@ -11,8 +11,12 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.os.Build
 import androidx.core.app.NotificationCompat
+import android.util.Log
 import androidx.lifecycle.LifecycleService
+import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.TimeUnit
 
 /**
  * Foreground service: camera + multi-item detection + voice.
@@ -33,9 +37,16 @@ class FinderService : LifecycleService() {
     private var voice: VoiceListener? = null
     private var link: LinkClient? = null
     private var uplink: FrameUplink? = null
+    private var streamer: AudioStreamer? = null
     private var speakQueue: SpeakQueue? = null
     private lateinit var store: MemoryStore
     private val voiceExecutor = Executors.newSingleThreadExecutor()
+
+    /** Image fetches and the answer watchdog; kept off the Vosk executor. */
+    private val netExecutor = Executors.newSingleThreadScheduledExecutor { r ->
+        Thread(r, "FinderNet").apply { isDaemon = true }
+    }
+    private var answerWatchdog: ScheduledFuture<*>? = null
 
     /** One buffered good look: the frame plus everything detected in it. */
     private class Sighting(val frame: Bitmap, val dets: List<ItemDetector.Det>)
@@ -81,6 +92,8 @@ class FinderService : LifecycleService() {
         val client = LinkClient(this, queue) { state -> broadcastLink(state) }
         link = client
         uplink = FrameUplink(client)
+        client.inbound = inbound
+        streamer = AudioStreamer(this, client, audioEvents)
         client.start()
 
         val cam = CameraFrameSource(this) { bitmap ->
@@ -202,7 +215,25 @@ class FinderService : LifecycleService() {
         for (s in states.values) clearBuffer(s)
     }
 
+    /**
+     * A tap is either a question for the brain or a question for the device, and which
+     * one is decided *here, now* — never cached at startup. [LinkClient.isConnected]
+     * reflects the live handshake state, so a Mac that went away between two taps
+     * silently costs the wearer nothing but a narrower vocabulary.
+     */
     private fun handleListenRequest() {
+        val client = link
+        val stream = streamer
+        if (client != null && stream != null && client.isConnected() && client.config.audioEnabled) {
+            stream.start()
+            return
+        }
+        Log.i(TAG, "brain unreachable — answering on-device")
+        handleListenLocally()
+    }
+
+    /** The Phase 1 path, untouched: 3 s of Vosk against the fixed grammar. */
+    private fun handleListenLocally() {
         val v = voice ?: return
         if (!v.isReady()) {
             broadcastVoice(state = STATE_NOT_READY, transcript = null, itemKey = null)
@@ -220,6 +251,94 @@ class FinderService : LifecycleService() {
         }
     }
 
+    // --- the streamed voice loop ---------------------------------------------
+
+    private val audioEvents = object : AudioStreamer.Events {
+        override fun onListening() {
+            broadcastVoice(STATE_LISTENING, transcript = null, itemKey = null)
+        }
+
+        /**
+         * The mic or the link failed before anything was sent, so nothing has been
+         * committed to the streamed path yet — fall back rather than fail the tap.
+         */
+        override fun onUnavailable() {
+            Log.w(TAG, "audio stream unavailable — falling back on-device")
+            handleListenLocally()
+        }
+
+        override fun onFinished(reason: String, heardSpeech: Boolean) {
+            if (!heardSpeech) {
+                // No point waiting on the Mac to tell us what silence sounded like.
+                broadcastVoice(STATE_DONE, transcript = null, itemKey = null)
+                return
+            }
+            armAnswerWatchdog()
+        }
+    }
+
+    private val inbound = object : LinkClient.Inbound {
+        override fun onTranscript(text: String, final: Boolean) {
+            if (text.isBlank()) return
+            broadcastVoice(STATE_HEARD, transcript = text, itemKey = null)
+        }
+
+        override fun onAnswer(answer: LinkClient.Answer) {
+            cancelAnswerWatchdog()
+            // Speech first and unconditionally: the photo is a bonus, never a gate.
+            speakQueue?.offer(answer.speak, "normal")
+            val imageId = answer.imageId
+            if (imageId == null) {
+                broadcastAnswer(answer, photoPath = null)
+                return
+            }
+            netExecutor.execute {
+                val path = link?.fetchImage(imageId)?.let { cacheAnswerPhoto(imageId, it) }
+                broadcastAnswer(answer, photoPath = path)
+            }
+        }
+
+        override fun onQueryError(code: String) {
+            cancelAnswerWatchdog()
+            // `speak` on the error has already been queued by LinkClient; the HUD only
+            // needs to stop signalling that we are still working on it.
+            broadcastVoice(STATE_DONE, transcript = null, itemKey = null)
+        }
+    }
+
+    /**
+     * Write the answer photo somewhere the UI process can read it. A single reused
+     * filename per image id keeps the cache from growing without bound, and stale
+     * files are harmless — the id is in the name, so a hit is always the right photo.
+     */
+    private fun cacheAnswerPhoto(imageId: String, bytes: ByteArray): String? = runCatching {
+        val dir = File(cacheDir, ANSWER_PHOTO_DIR).apply { mkdirs() }
+        // Ids come from the Mac; keep them from escaping the directory.
+        val safe = imageId.replace(Regex("[^A-Za-z0-9_.-]"), "_")
+        val f = File(dir, "$safe.jpg")
+        f.writeBytes(bytes)
+        f.absolutePath
+    }.getOrNull()
+
+    /**
+     * If the Mac never answers, the HUD must not pulse forever. This is the only
+     * timeout on the streamed path — everything else is driven by messages.
+     */
+    private fun armAnswerWatchdog() {
+        cancelAnswerWatchdog()
+        answerWatchdog = runCatching {
+            netExecutor.schedule({
+                Log.w(TAG, "no answer within ${ANSWER_TIMEOUT_MS}ms")
+                broadcastVoice(STATE_DONE, transcript = null, itemKey = null)
+            }, ANSWER_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        }.getOrNull()
+    }
+
+    private fun cancelAnswerWatchdog() {
+        answerWatchdog?.cancel(false)
+        answerWatchdog = null
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         super.onStartCommand(intent, flags, startId)
         return START_STICKY
@@ -227,16 +346,22 @@ class FinderService : LifecycleService() {
 
     override fun onDestroy() {
         runCatching { unregisterReceiver(listenReceiver) }
+        cancelAnswerWatchdog()
         voiceExecutor.shutdownNow()
+        netExecutor.shutdownNow()
         source?.stop()
         detector?.close()
         voice?.close()
+        // Before the link, so an open utterance stops writing to a socket we are closing.
+        streamer?.shutdown()
+        link?.inbound = null
         link?.stop()
         speakQueue?.shutdown()
         clearAllBuffers()
         source = null
         detector = null
         voice = null
+        streamer = null
         uplink = null
         link = null
         speakQueue = null
@@ -268,6 +393,25 @@ class FinderService : LifecycleService() {
             Intent(ACTION_LINK)
                 .setPackage(packageName)
                 .putExtra(EXTRA_LINK_STATE, state.name)
+        )
+    }
+
+    /**
+     * The answer travels to [MainActivity] rather than being shown from here: a
+     * foreground service on Android 12 cannot reliably start an activity, and the
+     * activity is already on screen. [photoPath] is null whenever the photo was
+     * absent or unfetchable — the answer still shows and has already been spoken.
+     */
+    private fun broadcastAnswer(answer: LinkClient.Answer, photoPath: String?) {
+        sendBroadcast(
+            Intent(ACTION_VOICE)
+                .setPackage(packageName)
+                .putExtra(EXTRA_VOICE_STATE, STATE_ANSWER)
+                .putExtra(EXTRA_VOICE_TRANSCRIPT, "")
+                .putExtra(EXTRA_VOICE_ITEM_KEY, "")
+                .putExtra(EXTRA_ANSWER_TITLE, answer.hudTitle)
+                .putExtra(EXTRA_ANSWER_TEXT, answer.hudText.ifBlank { answer.speak })
+                .putExtra(EXTRA_ANSWER_PHOTO, photoPath ?: "")
         )
     }
 
@@ -332,6 +476,10 @@ class FinderService : LifecycleService() {
         const val EXTRA_VOICE_STATE = "voiceState"
         const val EXTRA_VOICE_TRANSCRIPT = "voiceTranscript"
         const val EXTRA_VOICE_ITEM_KEY = "voiceItemKey"
+        const val EXTRA_ANSWER_TITLE = "answerTitle"
+        const val EXTRA_ANSWER_TEXT = "answerText"
+        /** Absolute path to a cached JPEG, or empty when there is no photo. */
+        const val EXTRA_ANSWER_PHOTO = "answerPhoto"
         /** One of [LinkClient.State] names. */
         const val EXTRA_LINK_STATE = "linkState"
 
@@ -339,8 +487,16 @@ class FinderService : LifecycleService() {
         const val STATE_MATCHED = "matched"
         const val STATE_DONE = "done"
         const val STATE_NOT_READY = "not_ready"
+        /** The Mac's transcript of what it heard — HUD only, never spoken. */
+        const val STATE_HEARD = "heard"
+        /** A full answer from the Mac: speech is already under way. */
+        const val STATE_ANSWER = "answer"
 
+        private const val TAG = "RokidFinder.Service"
         private const val CHANNEL_ID = "rokidfinder"
+        private const val ANSWER_PHOTO_DIR = "answers"
+        /** Generous: local ASR plus a local LLM on the Mac is not instant. */
+        private const val ANSWER_TIMEOUT_MS = 12_000L
         private const val NOTIF_ID = 1
 
         /**
