@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.net.wifi.WifiManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import android.util.Log
@@ -33,6 +34,7 @@ import java.util.concurrent.TimeUnit
 class FinderService : LifecycleService() {
 
     private var source: CameraFrameSource? = null
+    private var wifiLock: WifiManager.WifiLock? = null
     private var detector: ItemDetector? = null
     private var voice: VoiceListener? = null
     private var link: LinkClient? = null
@@ -73,8 +75,37 @@ class FinderService : LifecycleService() {
         }
     }
 
+    /**
+     * Ask Android to keep the radio up for as long as we are watching.
+     *
+     * These glasses power WiFi down when they go idle — observed three times in one
+     * afternoon, on a device with 8 hours of uptime and no reboot in between, which
+     * rules out a boot-time default. For a product whose whole promise is answering
+     * the moment it is asked, a radio that switches itself off is not a nuisance but
+     * a broken premise. A WifiLock is the sanctioned way to say "this app needs the
+     * network while it runs"; it is released with the service, so nothing is held
+     * once the camera stops.
+     */
+    private fun acquireWifiLock() {
+        val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as? WifiManager ?: return
+        val mode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            WifiManager.WIFI_MODE_FULL_LOW_LATENCY
+        } else {
+            @Suppress("DEPRECATION")
+            WifiManager.WIFI_MODE_FULL_HIGH_PERF
+        }
+        wifiLock = runCatching {
+            wm.createWifiLock(mode, "rokidfinder:link").apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+        }.getOrNull()
+        Log.i(TAG, "wifi lock held=${wifiLock?.isHeld == true}")
+    }
+
     override fun onCreate() {
         super.onCreate()
+        acquireWifiLock()
         startInForeground()
         store = MemoryStore(this)
 
@@ -345,6 +376,8 @@ class FinderService : LifecycleService() {
     }
 
     override fun onDestroy() {
+        runCatching { wifiLock?.takeIf { it.isHeld }?.release() }
+        wifiLock = null
         runCatching { unregisterReceiver(listenReceiver) }
         cancelAnswerWatchdog()
         voiceExecutor.shutdownNow()
