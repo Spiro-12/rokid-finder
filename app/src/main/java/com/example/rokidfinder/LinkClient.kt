@@ -1,6 +1,10 @@
 package com.example.rokidfinder
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.BatteryManager
 import android.util.Log
 import okhttp3.OkHttpClient
@@ -58,6 +62,7 @@ class LinkClient(
     @Volatile private var lastPongMs: Long = 0L
     @Volatile private var generation: Int = 0
     @Volatile private var stopped: Boolean = false
+    @Volatile private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
     private var attempt: Int = 0
     private var heartbeat: ScheduledFuture<*>? = null
@@ -88,11 +93,13 @@ class LinkClient(
     }
 
     fun start() {
+        registerNetworkWatcher()
         submit { connect() }
     }
 
     fun stop() {
         stopped = true
+        unregisterNetworkWatcher()
         submit {
             cancelTimers()
             runCatching { socket?.close(1000, "shutting down") }
@@ -101,6 +108,47 @@ class LinkClient(
             setState(State.OFFLINE)
         }
         exec.shutdown()
+    }
+
+    /**
+     * Retry the moment the network comes back, instead of waiting out the backoff.
+     *
+     * The backoff climbs to 30 s so a missing Mac isn't hammered, but that pacing is
+     * wrong when the reason for failure just disappeared: the glasses boot with WiFi
+     * off, so by the time the network arrives the delay can be half a minute of the
+     * wearer staring at nothing. A network transition is new information — treat it
+     * as such and reset the ladder.
+     */
+    private fun registerNetworkWatcher() {
+        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                if (stopped || handshakeDone) return
+                Log.i(TAG, "network available — retrying now")
+                submit {
+                    if (stopped || handshakeDone) return@submit
+                    attempt = 0
+                    cancelTimers()
+                    connect()
+                }
+            }
+        }
+        networkCallback = cb
+        runCatching {
+            cm.registerNetworkCallback(
+                NetworkRequest.Builder()
+                    .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    .build(),
+                cb,
+            )
+        }.onFailure { Log.w(TAG, "network watcher unavailable", it) }
+    }
+
+    private fun unregisterNetworkWatcher() {
+        val cb = networkCallback ?: return
+        networkCallback = null
+        val cm = appContext.getSystemService(ConnectivityManager::class.java) ?: return
+        runCatching { cm.unregisterNetworkCallback(cb) }
     }
 
     // --- connection lifecycle (exec thread) ---------------------------------
