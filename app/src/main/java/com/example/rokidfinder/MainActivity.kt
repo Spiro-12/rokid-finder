@@ -129,10 +129,19 @@ class MainActivity : AppCompatActivity() {
                     voiceReady = intent.getBooleanExtra(FinderService.EXTRA_VOICE_READY, false)
                 }
                 FinderService.ACTION_SAVED -> {
-                    val key = intent.getStringExtra(FinderService.EXTRA_SAVED_ITEM_KEY) ?: ""
-                    val display = TrackedItems.byKey(key)?.display ?: key
-                    if (display.isNotBlank()) {
-                        showWhisper("${display.replaceFirstChar { it.titlecase() }} remembered")
+                    // Only announce our own saves while we are the one remembering.
+                    // The on-device detector knows phone, laptop and cup — COCO
+                    // classes — while the Mac tracks keys, wallet and phone. With
+                    // both running the wearer was told "laptop remembered" and
+                    // "cup remembered" during a session about keys and a wallet:
+                    // two systems narrating different vocabularies at once, and
+                    // the one talking was the one not being asked.
+                    if (lastLinkState != LINK_CONNECTED) {
+                        val key = intent.getStringExtra(FinderService.EXTRA_SAVED_ITEM_KEY) ?: ""
+                        val display = TrackedItems.byKey(key)?.display ?: key
+                        if (display.isNotBlank()) {
+                            showWhisper("${display.replaceFirstChar { it.titlecase() }} remembered")
+                        }
                     }
                 }
                 FinderService.ACTION_VOICE -> handleVoice(intent)
