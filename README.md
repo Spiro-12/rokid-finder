@@ -16,8 +16,7 @@ Everything runs on the glasses. No phone app, no cloud, no internet.
 <p align="center"><img src="docs/images/demo.gif" alt="Through the Rokid Glasses at home: a laptop and phone on the dining table, the display says Laptop remembered and Phone remembered as the wearer looks away, then in the hallway a tap and the question Where is my phone brings up a full-screen photo captioned Phone, on the dining table, just now" width="280"></p>
 
 <p align="center"><sub>A real recording from the glasses at home (sped up while walking). The display is see-through, so the camera
-view is mirrored behind it for the recording. With sound on, the glasses say <i>"Your phone, on the dining table, just now."</i>
-<a href="https://youtube.com/shorts/pW-ttQqMQio">Another demo on YouTube</a>.</sub></p>
+view is mirrored behind it for the recording. With sound on, the glasses say <i>"Your phone, on the dining table, just now."</i></sub></p>
 
 ## What it does
 
