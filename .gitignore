@@ -19,3 +19,8 @@ yolov8n.pt
 yolov8n.onnx
 yolov8n_saved_model/
 calibration_image_sample_data_*.npy
+
+# Local model experiments
+*.pt
+*.onnx.bak
+.yolo-export-venv/
