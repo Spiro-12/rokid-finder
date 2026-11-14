@@ -13,10 +13,11 @@ Everything runs on the glasses. No phone app, no cloud, no internet.
 ![Rokid Glasses](https://img.shields.io/badge/runs%20on-Rokid%20Glasses-lightgrey)
 ![Offline](https://img.shields.io/badge/works-100%25%20offline-7c9cff)
 
-<p align="center"><img src="docs/images/demo.gif" alt="Through the Rokid Glasses in a café: a laptop, phone and cup on the table, the wearer walks away, the display says Cup remembered and Laptop remembered, then a tap brings up full-screen photos captioned Phone, Cup and Laptop, just now" width="300"></p>
+<p align="center"><img src="docs/images/demo.gif" alt="Through the Rokid Glasses at home: a laptop and phone on the dining table, the display says Laptop remembered and Phone remembered as the wearer looks away, then in the hallway a tap and the question Where is my phone brings up a full-screen photo captioned Phone, on the dining table, just now" width="280"></p>
 
-<p align="center"><sub>A real recording from the glasses (sped up while walking). The display is see-through, so the camera view is
-mirrored behind it for the recording. <a href="https://youtube.com/shorts/pW-ttQqMQio">Watch the full video on YouTube</a>.</sub></p>
+<p align="center"><sub>A real recording from the glasses at home (sped up while walking). The display is see-through, so the camera
+view is mirrored behind it for the recording. With sound on, the glasses say <i>"Your phone, on the dining table, just now."</i>
+<a href="https://youtube.com/shorts/pW-ttQqMQio">Another demo on YouTube</a>.</sub></p>
 
 ## What it does
 
@@ -31,9 +32,9 @@ mirrored behind it for the recording. <a href="https://youtube.com/shorts/pW-ttQ
 The rest of the time the display shows one dim dot and nothing else.
 
 <p align="center">
-  <img src="docs/images/watching.jpg" alt="Watching: a laptop and phone on a café table, only a small dot on the display" width="230">
-  <img src="docs/images/remembered.jpg" alt="Walking away: the display says Laptop remembered" width="230">
-  <img src="docs/images/recall.jpg" alt="Recall: a full-screen photo captioned Phone, just now" width="230">
+  <img src="docs/images/watching.jpg" alt="Watching: a laptop on the dining table, only a small dot on the display" width="230">
+  <img src="docs/images/remembered.jpg" alt="Looking away: the display says Phone remembered" width="230">
+  <img src="docs/images/recall.jpg" alt="Recall: a full-screen photo of the phone, captioned Phone, on the dining table, just now" width="230">
 </p>
 <p align="center"><sub>Watching · Remembered · Asked "where's my phone?"</sub></p>
 
@@ -109,7 +110,7 @@ Building your own Rokid app? The device quirks this project hit are in **[Notes 
   one. Teaching it keys needs a custom model ([how you could](docs/make-it-yours.md#keys-wallets-and-other-things-coco-doesnt-know)).
 - **It remembers the last place only.** One photo per item; a newer sighting replaces the older one.
 - **It has to see the item go.** If the item was never clearly in view (at least 40% sure), nothing is saved.
-- **Tested by one person** (Spiro), at home and in a café, over a few weeks of building. No accuracy numbers yet,
+- **Tested by one person** (Spiro), at home and in a café, over a few months of building. No accuracy numbers yet,
   and battery life has not been measured.
 - **English only**, and only the phrases in its list.
 
