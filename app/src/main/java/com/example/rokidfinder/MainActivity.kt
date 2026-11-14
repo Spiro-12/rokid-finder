@@ -219,7 +219,12 @@ class MainActivity : AppCompatActivity() {
                 // wearer is probably looking around for the thing, not at the display.
                 isListening = false
                 stopDotPulse()
-                val line = "I can only find that when your Mac is nearby."
+                // Keys and wallets are not classes the on-device model knows.
+                val line = if (BuildConfig.BRAIN_LINK) {
+                    "I can only find that when your Mac is nearby."
+                } else {
+                    "I can't see keys or wallets yet. Ask me about your phone, laptop or cup."
+                }
                 showWhisper(line, holdMs = 3000L)
                 Tts.speak(line)
             }

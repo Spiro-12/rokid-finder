@@ -11,8 +11,23 @@ android {
         applicationId = "com.example.rokidfinder"
         minSdk = 24
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1"
+        versionCode = 2
+        versionName = "1.0"
+
+        // The glasses are arm64. Some libraries (Vosk, TFLite) ship x86/armv7/mips
+        // copies too; dropping them roughly halves the APK.
+        ndk { abiFilters += "arm64-v8a" }
+
+        // Experimental link to a Mac "brain" on the same Wi-Fi. Off by default:
+        // it has no pairing, so with it on, any device on the network that
+        // advertises the service would receive camera frames and voice.
+        // Turn it on only for your own experiments: ./gradlew assembleDebug -PbrainLink=true
+        val brainLink = (project.findProperty("brainLink") as String?)?.toBoolean() ?: false
+        buildConfigField("boolean", "BRAIN_LINK", brainLink.toString())
+    }
+
+    buildFeatures {
+        buildConfig = true
     }
 
     buildTypes {

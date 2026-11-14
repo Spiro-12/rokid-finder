@@ -105,7 +105,8 @@ class FinderService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
-        acquireWifiLock()
+        // The Wi-Fi lock only serves the Mac link; without the link it would just cost battery.
+        if (BuildConfig.BRAIN_LINK) acquireWifiLock()
         startInForeground()
         store = MemoryStore(this)
 
@@ -118,14 +119,18 @@ class FinderService : LifecycleService() {
         // The brain speaks through the same Piper engine the local pipeline uses,
         // so it must be warm even if MainActivity never ran.
         Tts.ensureInit(this)
-        val queue = SpeakQueue()
-        speakQueue = queue
-        val client = LinkClient(this, queue) { state -> broadcastLink(state) }
-        link = client
-        uplink = FrameUplink(client)
-        client.inbound = inbound
-        streamer = AudioStreamer(this, client, audioEvents)
-        client.start()
+        // Off by default (see app/build.gradle.kts): with no link, nothing leaves the
+        // glasses, and every tap is answered on-device.
+        if (BuildConfig.BRAIN_LINK) {
+            val queue = SpeakQueue()
+            speakQueue = queue
+            val client = LinkClient(this, queue) { state -> broadcastLink(state) }
+            link = client
+            uplink = FrameUplink(client)
+            client.inbound = inbound
+            streamer = AudioStreamer(this, client, audioEvents)
+            client.start()
+        }
 
         val cam = CameraFrameSource(this) { bitmap ->
             val now = System.currentTimeMillis()
