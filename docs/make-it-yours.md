@@ -6,7 +6,7 @@ Any of the [COCO object types](https://github.com/amikelive/coco-labels/blob/mas
 works without training anything, for example `backpack`, `handbag`, `umbrella`, `remote`, `book`, `bottle`,
 `scissors`, `teddy bear`.
 
-Three places to change:
+Four places to change:
 
 1. **`TrackedItems.kt`**: add a line to `ALL`.
    ```kotlin
@@ -18,6 +18,7 @@ Three places to change:
    must be in its English vocabulary.
 3. **`ItemDetector.kt`**: if the new item was in `NEIGHBOR_LABELS` (like `book` or `backpack`), remove it there so it
    is not used as both an item and a "next to" anchor.
+4. **`MainActivity.kt`**: update the sentence "Ask me about your phone, laptop or cup." so it lists your items.
 
 Keep the list short (3 to 5 items). Each item adds a watcher, a small frame buffer and more phrases to recognize.
 

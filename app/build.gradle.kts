@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -15,7 +17,7 @@ android {
         versionName = "1.0"
 
         // The glasses are arm64. Some libraries (Vosk, TFLite) ship x86/armv7/mips
-        // copies too; dropping them roughly halves the APK.
+        // copies too; dropping them saves about 50 MB.
         ndk { abiFilters += "arm64-v8a" }
 
         // Experimental link to a Mac "brain" on the same Wi-Fi. Off by default:
@@ -30,9 +32,26 @@ android {
         buildConfig = true
     }
 
+    // Release APKs are signed with one key that never leaves the maintainer's machine, so
+    // `adb install -r` of a new release keeps the old one's memories. Anyone else building
+    // a release gets their local debug key instead (still a non-debuggable build).
+    val signingFile = File(System.getProperty("user.home"), ".android/rokid-finder-signing.properties")
+    signingConfigs {
+        if (signingFile.exists()) {
+            val p = Properties().apply { signingFile.inputStream().use { load(it) } }
+            create("release") {
+                storeFile = File(p.getProperty("storeFile"))
+                storePassword = p.getProperty("storePassword")
+                keyAlias = p.getProperty("keyAlias")
+                keyPassword = p.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
 

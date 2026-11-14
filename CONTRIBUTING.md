@@ -30,7 +30,7 @@ a device:
 1. Open the app from the launcher; the dot appears.
 2. Put your phone down, look away for 2 s: "Phone remembered".
 3. Tap, "Where's my phone?": photo and spoken answer.
-4. Tap, "Where are my keys?": the "I can't see keys or wallets yet" line.
+4. Tap, "Find my keys": the "I can't see keys or wallets yet" line.
 5. Volume up: record mode on and off.
 
 ## Pull requests

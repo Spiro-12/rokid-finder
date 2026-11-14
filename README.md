@@ -25,7 +25,7 @@ mirrored behind it for the recording. <a href="https://youtube.com/shorts/pW-ttQ
 | Put your phone on a table and walk off | Wait until it has been out of view for 2 seconds, then save a photo, the time, and what it was on or next to. A small "Phone remembered" fades in and out. |
 | Tap the temple touchpad and say "Where's my phone?" | Show the photo full screen and say "Your phone, on the dining table, next to your laptop, five minutes ago." |
 | Swipe while a photo is showing | Flip through everything else it remembers. Tap to close, or it closes itself after 8 seconds. |
-| Ask "Where are my keys?" | Say "I can't see keys or wallets yet. Ask me about your phone, laptop or cup." (keys are not something the built-in model knows, see [Limits](#honest-limits)) |
+| Ask "Find my keys" | Say "I can't see keys or wallets yet. Ask me about your phone, laptop or cup." (keys are not something the built-in model knows, see [Limits](#honest-limits)) |
 | Press volume up | Record mode: mirror the camera onto the display so a screen recording shows what you saw. |
 
 The rest of the time the display shows one dim dot and nothing else.
@@ -155,8 +155,8 @@ Adding them means training a small custom model. That is the most wanted contrib
 <details>
 <summary><b>How do I record a demo like the one above?</b></summary>
 
-Press volume up on the glasses to turn on record mode, then run `./record-demo.sh` on a computer with
-`adb` and `scrcpy`. See [Recording a demo](docs/recording-a-demo.md).
+Open the app on the glasses, then run `./record-demo.sh` on a computer with `adb` and `scrcpy`. It turns record
+mode on and off for you. See [Recording a demo](docs/recording-a-demo.md).
 
 </details>
 
@@ -202,9 +202,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md).
 - Voice: the [Piper](https://github.com/rhasspy/piper) `en_US-amy-low` voice
   ([model card and license](https://huggingface.co/rhasspy/piper-voices/tree/main/en/en_US/amy/low)), run with
   [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) (Apache 2.0) and [ONNX Runtime](https://onnxruntime.ai/) (MIT).
+- Pronunciation: [espeak-ng](https://github.com/espeak-ng/espeak-ng) and its data (GPL-3.0), used by the Piper voice.
+- Networking and native glue: [OkHttp](https://square.github.io/okhttp/) and [JNA](https://github.com/java-native-access/jna) (Apache 2.0).
 - Camera: [CameraX](https://developer.android.com/media/camera/camerax).
 - The Rokid community catalog [awesome-rokid](https://github.com/Anezium/awesome-rokid).
 
 ## License
 
-[MIT](LICENSE) for the code in this repo. The bundled models and libraries keep their own licenses (above).
+[MIT](LICENSE) for the code in this repo. The bundled models and libraries keep their own licenses (above). Because
+the voice uses espeak-ng (GPL-3.0), the APK as a whole is also covered by the GPL-3.0; its full source is this repo.

@@ -264,7 +264,7 @@ class FinderService : LifecycleService() {
             stream.start()
             return
         }
-        Log.i(TAG, "brain unreachable — answering on-device")
+        Log.i(TAG, if (BuildConfig.BRAIN_LINK) "brain unreachable — answering on-device" else "answering on-device")
         handleListenLocally()
     }
 

@@ -57,7 +57,7 @@ picture. Pure box geometry, no extra model:
 
 - **On:** a surface whose box contains the item's horizontal center, with the item's bottom edge inside the surface
   box (a little slack above the top edge, because a cup often hides the table's rim). The largest such surface wins.
-- **Next to:** up to two objects whose centers are within 1.5 item-widths. Other tracked items come first
+- **Next to:** up to two objects whose centers are within 1.5 times the item's size (its longer side). Other tracked items come first
   ("your laptop" beats "the book").
 - Only detections at **0.45** or more are ever spoken about. A wrong "next to the book" costs more trust than a
   missing one.

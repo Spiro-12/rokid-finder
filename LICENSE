@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2026 Spiro El Khoury
+Copyright (c) 2026 Spiro El Khoury and contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -21,4 +21,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 The bundled models and libraries in app/src/main/assets and app/src/main/jniLibs
-keep their own licenses; see the Credits section of README.md.
+keep their own licenses; see the Credits section of README.md. The voice uses
+espeak-ng (GPL-3.0), so the built APK as a whole is also subject to the GPL-3.0.

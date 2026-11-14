@@ -3,7 +3,7 @@
 To see what the app is doing, watch its log while you test:
 
 ```bash
-adb logcat -s RokidFinder.Service RokidFinder.Main RokidFinder.Recall RokidFinder.Tts VoiceListener ItemDetector CameraFrameSource
+adb logcat -s RokidFinder.Service RokidFinder.Main RokidFinder.Recall RokidFinder.Tts VoiceListener ItemDetector CameraFrameSource MemoryStore
 ```
 
 ## Nothing happens after I open it
@@ -32,6 +32,11 @@ adb logcat -s RokidFinder.Service RokidFinder.Main RokidFinder.Recall RokidFinde
 
 The speech model is still loading. On the first start it is unpacked to storage, which takes longer. Try again in a
 few seconds.
+
+## I asked, and it shows a list or "Nothing remembered yet"
+
+It understood you, but it has no memory of that item yet, so it shows what it does remember (or nothing) without
+speaking. Put the item down in view and look away for 2 seconds first.
 
 ## It found the item but says nothing
 
