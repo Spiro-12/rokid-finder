@@ -6,7 +6,7 @@ The glasses' camera quietly watches for your phone, laptop and cup. When you put
 a photo of where it was. Tap the side of the glasses, ask *"Where's my phone?"*, and they show you the photo and tell
 you out loud: *"Your phone, on the dining table, next to your laptop, five minutes ago."*
 
-Everything runs on the glasses. No phone app, no cloud, no internet.
+Everything runs on the glasses. No phone app, cloud or internet.
 
 [![Build](https://github.com/Spiro-12/rokid-finder/actions/workflows/build.yml/badge.svg)](https://github.com/Spiro-12/rokid-finder/actions/workflows/build.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
